@@ -1,0 +1,230 @@
+now lets work on the second phase. create the full backend for the streamlit frontend. 
+follow this folder structure for maximising scalability and fast testing:
+StudHelper-Streamlit/                    # 📁 Root project directory
+├── 📄 main.py                         # 🔄 UPDATED - Main Streamlit app with real backend integration
+├── 📄 .env                            # 🆕 NEW - Environment variables (OpenAI API key, etc.)
+├── 📄 .env.template                   # 🆕 NEW - Environment template for setup
+├── 📄 requirements.txt                # 🔄 UPDATED - All real dependencies (no more placeholders)
+├── 📄 README.md                       # 🔄 UPDATED - Complete setup and usage guide
+├── 📄 .gitignore                      # ✅ EXISTING - Git ignore rules
+├── 📄 setup_folders.sh                # ✅ EXISTING - Folder setup script
+│
+├── 📁 components/                     # 🖥️ FRONTEND COMPONENTS
+│   ├── 📄 __init__.py                 # ✅ EXISTING - Package marker
+│   ├── 📄 sidebar.py                  # ✅ EXISTING - Class management sidebar
+│   ├── 📄 welcome.py                  # ✅ EXISTING - Welcome/landing page
+│   ├── 📄 knowledge_upload.py         # 🔄 UPDATED - Real file processing integration
+│   └── 📄 chat_interface.py           # 🔄 UPDATED - Real AI chat with 3 modes
+│
+├── 📁 utils/                          # ⚙️ BACKEND UTILITIES
+│   ├── 📄 __init__.py                 # ✅ EXISTING - Package marker
+│   ├── 📄 session_state.py            # 🔄 UPDATED - Enhanced state management
+│   ├── 📄 file_processing.py          # 🔄 UPDATED - REAL file processing (no placeholders)
+│   ├── 📄 youtube_handler.py          # 🔄 UPDATED - REAL Whisper transcription
+│   ├── 📄 openai_handler.py           # 🆕 NEW - OpenAI API integration & cost tracking
+│   └── 📄 vector_database.py          # 🆕 NEW - ChromaDB vector database management
+│
+├── 📁 storage/                        # 💾 DATA STORAGE
+│   ├── 📁 uploads/                    # 📄 Document uploads
+│   │   ├── 📄 .gitkeep                # ✅ EXISTING - Keep empty folder in git
+│   │   └── 📄 [uploaded_files]        # 🔄 DYNAMIC - User uploaded documents
+│   │
+│   ├── 📁 vectors/                    # 🔢 Vector database
+│   │   ├── 📄 .gitkeep                # ✅ EXISTING - Keep empty folder in git
+│   │   ├── 📄 chroma.sqlite3          # 🔄 DYNAMIC - ChromaDB database file
+│   │   └── 📁 [class_collections]/    # 🔄 DYNAMIC - Per-class vector collections
+│   │
+│   └── 📁 temp/                       # 🆕 NEW - Temporary files (auto-created)
+│       └── 📁 audio/                  # 🔄 DYNAMIC - YouTube audio downloads
+│
+├── 📁 docs/                           # 📚 DOCUMENTATION
+│   ├── 📄 setup_guide.md              # 🆕 NEW - Complete setup instructions
+│   ├── 📄 architecture.md             # 🆕 NEW - System architecture docs
+│   ├── 📄 performance_upgrades.md     # 🆕 NEW - Optimization recommendations
+│   └── 📄 cost_analysis.md            # 🆕 NEW - Cost tracking and estimates
+│
+├── 📁 tests/                          # 🧪 TESTING (Future Phase)
+│   ├── 📄 __init__.py                 # 📋 PLANNED - Test package marker
+│   ├── 📄 test_file_processing.py     # 📋 PLANNED - File processing tests
+│   ├── 📄 test_openai_handler.py      # 📋 PLANNED - OpenAI integration tests
+│   ├── 📄 test_vector_database.py     # 📋 PLANNED - Vector DB tests
+│   └── 📄 test_youtube_handler.py     # 📋 PLANNED - YouTube processing tests
+│
+├── 📁 config/                         # ⚙️ CONFIGURATION (Future Phase)
+│   ├── 📄 prompts.yaml                # 📋 PLANNED - System prompt templates
+│   ├── 📄 models.yaml                 # 📋 PLANNED - Model configurations
+│   └── 📄 costs.yaml                  # 📋 PLANNED - Cost rate configurations
+│
+└── 📁 logs/                           # 📊 LOGGING (Future Phase)
+    ├── 📄 app.log                     # 📋 PLANNED - Application logs
+    ├── 📄 costs.log                   # 📋 PLANNED - Cost tracking logs
+    └── 📄 errors.log                  # 📋 PLANNED - Error logs
+
+# 📊 DETAILED FILE BREAKDOWN
+
+## 🔄 UPDATED FILES (Enhanced with real backend)
+
+### 📄 main.py
+- Real environment checking
+- OpenAI API key validation  
+- System status monitoring
+- Cost tracking display
+- Real backend integration
+
+### 📁 components/
+├── 📄 knowledge_upload.py
+│   - Real file validation
+│   - Actual processing progress
+│   - Vector database integration
+│   - Real cost estimation
+│
+└── 📄 chat_interface.py
+    - 3 real AI modes (Economic/Standard/Turbo)
+    - Real OpenAI API calls
+    - Vector similarity search
+    - Cost tracking per message
+    - Source attribution from documents
+
+### 📁 utils/
+├── 📄 file_processing.py
+│   - REAL PDF processing (PyPDF2, pdfplumber)
+│   - REAL Word processing (python-docx)
+│   - REAL PowerPoint processing (python-pptx)
+│   - Smart chunking algorithms
+│   - Error handling & validation
+│
+├── 📄 youtube_handler.py
+│   - REAL audio download (yt-dlp)
+│   - REAL transcription (Whisper)
+│   - Video info extraction
+│   - Cost estimation
+│   - Multiple quality levels
+│
+└── 📄 session_state.py
+    - Enhanced class management
+    - Vector database integration
+    - Cost tracking state
+    - Debug utilities
+
+## 🆕 NEW FILES (Phase 2 Backend)
+
+### 📄 utils/openai_handler.py
+- OpenAI API client setup
+- Chat completions with 3 modes:
+  * Economic: gpt-4o-mini ($0.15/$0.60 per 1M tokens)
+  * Standard: gpt-4o ($2.50/$10.00 per 1M tokens)  
+  * Turbo: gpt-4o + Chain of Thought
+- Embeddings generation (text-embedding-3-small/large)
+- Real-time token counting
+- Cost tracking and limits
+- Error handling & retries
+
+### 📄 utils/vector_database.py
+- ChromaDB client management
+- Per-class collections
+- Document embedding storage
+- Similarity search with metadata
+- Context retrieval for chat
+- Collection statistics
+- Database health monitoring
+
+### 📄 .env / .env.template
+- OpenAI API key configuration
+- Storage path settings
+- Processing parameters
+- Cost control limits
+- Model configurations
+
+### 📄 requirements.txt (UPDATED)
+- All real dependencies
+- OpenAI API client
+- ChromaDB vector database
+- Document processing libraries
+- YouTube processing tools
+- Audio transcription (Whisper)
+
+## 📋 PROCESSING FLOW
+
+### 📄 Document Processing Path:
+1. components/knowledge_upload.py → User uploads file
+2. utils/file_processing.py → Extract text (PDF/Word/PowerPoint)
+3. utils/file_processing.py → Create chunks with overlap
+4. utils/openai_handler.py → Generate embeddings
+5. utils/vector_database.py → Store in ChromaDB
+6. storage/vectors/ → Persistent vector storage
+
+### 🎥 YouTube Processing Path:
+1. components/knowledge_upload.py → User enters URL
+2. utils/youtube_handler.py → Validate & get video info
+3. utils/youtube_handler.py → Download audio (yt-dlp)
+4. utils/youtube_handler.py → Transcribe with Whisper
+5. utils/openai_handler.py → Generate embeddings
+6. utils/vector_database.py → Store transcript chunks
+
+### 💬 Chat Processing Path:
+1. components/chat_interface.py → User asks question
+2. utils/vector_database.py → Search for relevant chunks
+3. utils/vector_database.py → Retrieve context
+4. utils/openai_handler.py → Create prompt + context
+5. utils/openai_handler.py → Call OpenAI API
+6. utils/openai_handler.py → Track tokens & cost
+7. components/chat_interface.py → Display response + sources
+
+## 🔧 SETUP REQUIREMENTS
+
+### System Dependencies:
+- Python 3.8+ with pip
+- FFmpeg (for YouTube audio processing)
+- 4GB+ RAM (for Whisper models)
+- OpenAI API key with credits
+
+### Python Packages (automatically installed):
+- streamlit, openai, chromadb
+- PyPDF2, pdfplumber, python-docx, python-pptx
+- whisper, yt-dlp, torch
+- tiktoken, numpy, pandas
+
+### Storage Requirements:
+- ~1GB for Whisper models (auto-downloaded)
+- ~100MB for ChromaDB per class
+- Variable space for uploaded documents
+
+## 🎯 PHASE 2 COMPLETION STATUS
+
+✅ COMPLETE: Real backend implementation
+✅ COMPLETE: 3-mode AI chat system  
+✅ COMPLETE: Document & YouTube processing
+✅ COMPLETE: Vector database integration
+✅ COMPLETE: Cost tracking & monitoring
+✅ COMPLETE: Modular architecture
+✅ COMPLETE: Ready for production testing
+
+## 📈 READY FOR PHASE 3 (Future)
+- Advanced prompt engineering
+- Response caching system
+- Performance optimizations
+- Multi-user support
+- Cloud deployment options
+Content is user-generated and unverified.
+ 
+
+for costs traking leave it as only tracking how many tokens per model have you used and then multiply it by the price per M tokens of that model. in the future we will use the Usage API (beta) from openai.
+
+with this phase finished I have to be able to:
+1. create classes.
+2. add knowledge. real file/YouTube link processing
+3. select one of the 3 different methods for chatting
+4. chat freely. 'freely' but it has to be real, no placeholders
+
+
+
+
+
+
+create 3 modes for chatting:
+economic: using models with the mini version to reduce costs to max (gpt-mini)
+standart: standart computing costs and standard performance (gpt)
+turbo: best models, chain of thought available. prioritise performance before costs (gpt-turbo)
+
+
+also tell me potential upgrades in the code you are going to create. ej. upgrade prompts, migrate to other libraries, … where you really think it is important to double check for potential losses of performance
