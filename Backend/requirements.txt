@@ -1,0 +1,3 @@
+# Main requirements file - includes all dependencies
+-r requirements/base.txt
+
