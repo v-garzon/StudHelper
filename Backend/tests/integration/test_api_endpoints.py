@@ -6,16 +6,8 @@ from httpx import AsyncClient
 
 class TestDocumentEndpoints:
     """Test document API endpoints."""
-    
-    async def test_upload_and_process_document(
-        self, 
-        client: AsyncClient, 
-        auth_headers, 
-        sample_pdf_content,
-        mock_openai
-    ):
-        """Test complete document upload and processing flow."""
-        # Upload document
+    @pytest.mark.asyncio
+    async def test_upload_and_process_document(self, client, auth_headers, sample_pdf_content, mock_openai):
         files = {"file": ("test.pdf", sample_pdf_content, "application/pdf")}
         response = await client.post(
             "/api/v1/documents/upload",
@@ -36,7 +28,7 @@ class TestDocumentEndpoints:
         assert response.status_code == 200
         assert response.json()["filename"] == "test.pdf"
     
-    async def test_youtube_upload(self, client: AsyncClient, auth_headers):
+    async def test_youtube_upload(self, client, auth_headers):
         """Test YouTube video upload."""
         response = await client.post(
             "/api/v1/documents/youtube",
@@ -55,7 +47,7 @@ class TestDocumentEndpoints:
 class TestChatEndpoints:
     """Test chat API endpoints."""
     
-    async def test_chat_message(self, client: AsyncClient, auth_headers, mock_openai):
+    async def test_chat_message(self, client, auth_headers, mock_openai):
         """Test sending chat message."""
         response = await client.post(
             "/api/v1/ai/chat",
@@ -73,10 +65,9 @@ class TestChatEndpoints:
         assert data["mode"] == "economic"
         assert "session_id" in data
     
-    async def test_get_chat_sessions(self, client: AsyncClient, auth_headers):
+    async def test_get_chat_sessions(self, client, auth_headers):
         """Test getting chat sessions."""
         response = await client.get("/api/v1/ai/sessions", headers=auth_headers)
         
         assert response.status_code == 200
         assert isinstance(response.json(), list)
-

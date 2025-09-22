@@ -1,0 +1,19 @@
+
+# Test Document
+
+This is a test document for StudHelper.
+
+## Introduction
+
+StudHelper is an AI-powered study assistant that helps students learn more effectively.
+
+## Features
+
+- Document processing
+- AI chat assistance  
+- Vector search
+- Usage tracking
+
+## Conclusion
+
+This document demonstrates the text processing capabilities.

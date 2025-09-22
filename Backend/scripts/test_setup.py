@@ -15,6 +15,7 @@ from src.core.database import create_tables, Base
 from src.auth.service import AuthService
 from src.core.database import get_db
 from src.config import get_settings
+from src.auth.schemas import UserCreate
 
 
 async def setup_test_database():
@@ -62,11 +63,11 @@ async def create_test_users():
         
         for user_data in test_users:
             try:
-                user = await auth_service.create_user(
+                user = await auth_service.create_user(UserCreate(
                     email=user_data["email"],
                     username=user_data["username"],
                     password=user_data["password"],
-                )
+                ))
                 print(f"  ✅ Created user: {user.email}")
             except Exception as e:
                 print(f"  ⚠️  User {user_data['email']} already exists or error: {e}")

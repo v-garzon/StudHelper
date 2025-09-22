@@ -15,10 +15,19 @@ class CostCalculator:
     """Token counting and cost calculation service."""
     
     def __init__(self):
-        self.encodings = {
-            'gpt-4o-mini': tiktoken.encoding_for_model('gpt-4o-mini'),
-            'gpt-4o': tiktoken.encoding_for_model('gpt-4o'),
-        }
+        
+        # Use fallback encodings for newer models
+        try:
+            self.encodings = {
+                'gpt-4o-mini': tiktoken.encoding_for_model('gpt-3.5-turbo'),  # Use fallback
+                'gpt-4o': tiktoken.encoding_for_model('gpt-4'),
+            }
+        except KeyError:
+            # Fallback to cl100k_base encoding for all models
+            self.encodings = {
+                'gpt-4o-mini': tiktoken.get_encoding('cl100k_base'),
+                'gpt-4o': tiktoken.get_encoding('cl100k_base'),
+            }
         
         self.pricing = {
             'economic': {

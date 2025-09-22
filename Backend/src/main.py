@@ -39,16 +39,19 @@ async def lifespan(app: FastAPI):
     try:
         from src.core.database import get_db
         from src.auth.service import AuthService
+        from src.auth.schemas import UserCreate
         
         async with get_db() as db:
             auth_service = AuthService(db)
-            user = await auth_service.get_user_by_email("default@studhelper.local")
+            user = await auth_service.get_user_by_email("default@studhelper.com")
             if not user:
-                await auth_service.create_user(
-                    email="default@studhelper.local",
-                    username="default_user",
-                    password="default_password_change_me",
+                # Create UserCreate object with the correct structure
+                user_data = UserCreate(
+                    email="default@studhelper.com",
+                    username="default_user", 
+                    password="default_password_change_me"
                 )
+                await auth_service.create_user(user_data)
                 logger.info("Created default user for single-user mode")
     except Exception as e:
         logger.error(f"Failed to create default user: {e}")
@@ -59,7 +62,6 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("StudHelper AI Backend shutting down")
-
 
 # Create FastAPI app
 app = FastAPI(

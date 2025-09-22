@@ -61,7 +61,6 @@ class AuthService:
         await self.db.commit()
         
         return user
-    
     async def login(self, email: str, password: str) -> LoginResponse:
         """Login user and return token."""
         user = await self.authenticate_user(email, password)
@@ -71,12 +70,29 @@ class AuthService:
         if not user.is_active:
             raise AuthenticationError("Account is disabled")
         
+        # Refresh the user object to ensure all attributes are loaded
+        await self.db.refresh(user)
+        
         # Create access token
         access_token = create_access_token(data={"sub": str(user.id)})
         
+        # Convert to dict first to avoid SQLAlchemy async issues
+        user_dict = {
+            "id": user.id,
+            "email": user.email,
+            "username": user.username,
+            "full_name": user.full_name,
+            "role": user.role,
+            "is_active": user.is_active,
+            "is_verified": user.is_verified,
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
+            "last_login": user.last_login,
+        }
+        
         return LoginResponse(
             access_token=access_token,
-            user=UserResponse.model_validate(user),
+            user=UserResponse.model_validate(user_dict),
         )
     
     async def get_user_by_id(self, user_id: int) -> Optional[User]:

@@ -5,7 +5,7 @@
 from functools import lru_cache
 from typing import List, Optional, Union
 
-from pydantic import Field, computed_field, validator
+from pydantic import Field, field_validator, computed_field
 from pydantic_settings import BaseSettings
 
 
@@ -53,17 +53,15 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
     
-    @validator('CORS_ORIGINS', pre=True)
+    @field_validator('CORS_ORIGINS', mode='before')
+    @classmethod
     def parse_cors_origins(cls, v):
         """Parse CORS origins from string or list."""
         if isinstance(v, str):
-            # Split comma-separated string and strip whitespace
             return [origin.strip() for origin in v.split(',') if origin.strip()]
         elif isinstance(v, list):
-            # Already a list, just return it
             return v
         else:
-            # Fallback to default
             return ["http://localhost:3000", "http://localhost:8501"]
     
     @computed_field

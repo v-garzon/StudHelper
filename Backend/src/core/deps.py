@@ -10,6 +10,7 @@ from src.auth.jwt_handler import decode_jwt_token
 from src.auth.models import User
 from src.auth.service import AuthService
 from src.core.database import get_db_session
+from src.auth.schemas import UserCreate
 
 security = HTTPBearer()
 
@@ -67,11 +68,11 @@ async def get_default_user(
     
     if not user:
         # Create default user
-        user = await auth_service.create_user(
-            email="default@studhelper.local",
+        user = await auth_service.create_user(UserCreate(
+            email="default@studhelper.com",
             username="default_user",
             password="default_password_change_me",
-        )
+        ))
     
     return user
 

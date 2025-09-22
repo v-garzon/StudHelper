@@ -220,13 +220,13 @@ class AdaptiveChunker(TextChunker):
         if metadata.get("file_type") == "youtube":
             return "transcript"
         
-        # Analyze text content
-        code_indicators = len(re.findall(r'[{}\[\]();]|def |class |import |from ', text))
+        # Analyze text content - make detection more sensitive
+        code_indicators = len(re.findall(r'def\s+\w+\(|class\s+\w+\s*[\(:]|import\s+\w+|from\s+\w+', text))
         academic_indicators = len(re.findall(r'\b(abstract|introduction|methodology|conclusion|references)\b', text, re.IGNORECASE))
         
-        if code_indicators > 10:
+        if code_indicators >= 2:  # Lower threshold
             return "code"
-        elif academic_indicators > 2:
+        elif academic_indicators >= 2:
             return "academic"
         elif "transcript" in text.lower() or metadata.get("extraction_method") == "whisper":
             return "transcript"

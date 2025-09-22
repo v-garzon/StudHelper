@@ -1,5 +1,6 @@
 """Test configuration and fixtures."""
 
+import httpx
 import pytest
 import asyncio
 import tempfile
@@ -17,6 +18,7 @@ from src.core.database import Base, get_db_session
 from src.auth.service import AuthService
 from src.auth.models import User
 from src.config import get_settings
+from src.auth.schemas import UserCreate
 
 # Test settings
 settings = get_settings()
@@ -64,37 +66,39 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
 
 
 @pytest.fixture
-async def client(db_session) -> AsyncGenerator[AsyncClient, None]:
+async def client(db_session):
     """Create test client with database override."""
     async def override_get_db():
         yield db_session
     
     app.dependency_overrides[get_db_session] = override_get_db
     
-    async with AsyncClient(app=app, base_url="http://test") as client:
-        yield client
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        yield ac
     
     app.dependency_overrides.clear()
 
 
 @pytest.fixture
-async def test_user(db_session: AsyncSession) -> User:
+async def test_user(db_session) -> User:
     """Create test user."""
     auth_service = AuthService(db_session)
-    user = await auth_service.create_user(
+    user = await auth_service.create_user(UserCreate(
         email="test@example.com",
         username="testuser",
         password="testpass123",
-    )
+    ))
     return user
 
 
 @pytest.fixture
-async def auth_headers(test_user: User) -> dict:
+async def auth_headers(test_user) -> dict:
     """Create authentication headers."""
     from src.auth.jwt_handler import create_access_token
-    
-    token = create_access_token(data={"sub": str(test_user.id)})
+
+    # Fix: await the test_user fixture properly
+    user = await test_user if hasattr(test_user, '__await__') else test_user
+    token = create_access_token(data={"sub": str(user.id)})
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -142,4 +146,3 @@ def temp_upload_dir():
     """Create temporary upload directory."""
     with tempfile.TemporaryDirectory() as temp_dir:
         yield temp_dir
-
