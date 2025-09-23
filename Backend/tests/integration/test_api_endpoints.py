@@ -28,6 +28,7 @@ class TestDocumentEndpoints:
         assert response.status_code == 200
         assert response.json()["filename"] == "test.pdf"
     
+    @pytest.mark.asyncio
     async def test_youtube_upload(self, client, auth_headers):
         """Test YouTube video upload."""
         response = await client.post(
@@ -47,6 +48,7 @@ class TestDocumentEndpoints:
 class TestChatEndpoints:
     """Test chat API endpoints."""
     
+    @pytest.mark.asyncio
     async def test_chat_message(self, client, auth_headers, mock_openai):
         """Test sending chat message."""
         response = await client.post(
@@ -65,6 +67,7 @@ class TestChatEndpoints:
         assert data["mode"] == "economic"
         assert "session_id" in data
     
+    @pytest.mark.asyncio
     async def test_get_chat_sessions(self, client, auth_headers):
         """Test getting chat sessions."""
         response = await client.get("/api/v1/ai/sessions", headers=auth_headers)

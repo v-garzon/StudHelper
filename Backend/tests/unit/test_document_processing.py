@@ -11,6 +11,7 @@ from src.documents.processors.pdf_processor import PDFProcessor
 class TestDocumentService:
     """Test document service."""
     
+    @pytest.mark.asyncio
     async def test_upload_document(self, db_session, test_user, sample_pdf_content):
         """Test document upload."""
         service = DocumentService(db_session)
@@ -27,6 +28,7 @@ class TestDocumentService:
         assert document.file_size == len(sample_pdf_content)
         assert document.status == "pending"
     
+    @pytest.mark.asyncio
     async def test_add_youtube_video(self, db_session, test_user):
         """Test adding YouTube video."""
         service = DocumentService(db_session)

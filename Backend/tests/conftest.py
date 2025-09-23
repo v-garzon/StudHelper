@@ -55,7 +55,7 @@ async def test_engine():
 
 
 @pytest.fixture
-async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
+async def db_session(test_engine):
     """Create database session for tests."""
     async_session = sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False
@@ -80,7 +80,7 @@ async def client(db_session):
 
 
 @pytest.fixture
-async def test_user(db_session) -> User:
+async def test_user(db_session):
     """Create test user."""
     auth_service = AuthService(db_session)
     user = await auth_service.create_user(UserCreate(
@@ -92,13 +92,11 @@ async def test_user(db_session) -> User:
 
 
 @pytest.fixture
-async def auth_headers(test_user) -> dict:
+async def auth_headers(test_user):
     """Create authentication headers."""
     from src.auth.jwt_handler import create_access_token
 
-    # Fix: await the test_user fixture properly
-    user = await test_user if hasattr(test_user, '__await__') else test_user
-    token = create_access_token(data={"sub": str(user.id)})
+    token = create_access_token(data={"sub": str(test_user.id)})
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -136,8 +134,6 @@ def mock_openai():
 @pytest.fixture
 def sample_pdf_content() -> bytes:
     """Create sample PDF content."""
-    # This would ideally be a real minimal PDF
-    # For testing, we'll use a simple bytes representation
     return b"%PDF-1.4\n1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\nxref\n0 3\n0000000000 65535 f \ntrailer\n<</Size 3/Root 1 0 R>>\nstartxref\n9\n%%EOF"
 
 

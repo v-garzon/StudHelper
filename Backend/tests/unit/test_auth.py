@@ -11,6 +11,7 @@ from src.core.exceptions import ValidationError, AuthenticationError
 class TestAuthService:
     """Test authentication service."""
     
+    @pytest.mark.asyncio
     async def test_create_user(self, db_session):
         """Test user creation."""
         auth_service = AuthService(db_session)
@@ -28,6 +29,7 @@ class TestAuthService:
         assert user.hashed_password != "password123"  # Should be hashed
         assert user.is_active is True
     
+    @pytest.mark.asyncio
     async def test_create_duplicate_user(self, db_session, test_user):
         """Test creating user with duplicate email."""
         auth_service = AuthService(db_session)
@@ -41,6 +43,7 @@ class TestAuthService:
         with pytest.raises(ValidationError, match="already exists"):
             await auth_service.create_user(user_data)
     
+    @pytest.mark.asyncio
     async def test_authenticate_user(self, db_session, test_user):
         """Test user authentication."""
         auth_service = AuthService(db_session)
@@ -62,6 +65,7 @@ class TestAuthService:
 class TestAuthRoutes:
     """Test authentication routes."""
     
+    @pytest.mark.asyncio
     async def test_register_user(self, client: AsyncClient):
         """Test user registration endpoint."""
         response = await client.post("/api/v1/auth/register", json={
@@ -76,6 +80,7 @@ class TestAuthRoutes:
         assert data["username"] == "registeruser"
         assert "id" in data
     
+    @pytest.mark.asyncio
     async def test_login_user(self, client: AsyncClient, test_user):
         """Test user login endpoint."""
         response = await client.post("/api/v1/auth/login", json={
@@ -89,6 +94,7 @@ class TestAuthRoutes:
         assert data["token_type"] == "bearer"
         assert data["user"]["email"] == test_user.email
     
+    @pytest.mark.asyncio
     async def test_login_invalid_credentials(self, client: AsyncClient):
         """Test login with invalid credentials."""
         response = await client.post("/api/v1/auth/login", json={
@@ -98,6 +104,7 @@ class TestAuthRoutes:
         
         assert response.status_code == 401
     
+    @pytest.mark.asyncio
     async def test_get_current_user(self, client: AsyncClient, auth_headers):
         """Test getting current user info."""
         response = await client.get("/api/v1/auth/me", headers=auth_headers)

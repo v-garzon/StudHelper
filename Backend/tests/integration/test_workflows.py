@@ -7,6 +7,7 @@ from httpx import AsyncClient
 class TestCompleteWorkflow:
     """Test complete application workflows."""
     
+    @pytest.mark.asyncio
     async def test_study_session_workflow(
         self,
         client: AsyncClient,

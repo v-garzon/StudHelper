@@ -42,6 +42,7 @@ class TestCostCalculator:
 class TestChatService:
     """Test chat service."""
     
+    @pytest.mark.asyncio
     async def test_chat_without_context(self, db_session, test_user, mock_openai):
         """Test basic chat without context."""
         service = ChatService(db_session)
