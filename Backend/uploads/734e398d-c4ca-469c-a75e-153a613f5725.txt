@@ -1,0 +1,2 @@
+This is a test document for StudHelper.
+It contains sample text for testing document processing.

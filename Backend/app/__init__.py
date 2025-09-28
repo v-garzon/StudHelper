@@ -1,0 +1,2 @@
+# StudHelper Backend Application Package
+
