@@ -1,0 +1,2255 @@
+### NEW FILE: README.md
+# StudHelper Frontend
+
+A Vue.js frontend for StudHelper - your personal AI study assistant that allows you to upload documents and chat with an AI tutor about your specific study materials.
+
+## Features
+
+- **Class Management**: Create and organize study classes
+- **Document Upload**: Upload PDFs, Word docs, PowerPoint, and YouTube videos
+- **AI Chat**: Chat with an AI tutor that understands your materials
+- **User Management**: Authentication and profile management
+- **Usage Tracking**: Monitor AI usage and limits
+
+## Tech Stack
+
+- **Vue 3** with Composition API
+- **Vite** for build tooling
+- **Tailwind CSS** for styling
+- **Pinia** for state management
+- **Vue Router** for navigation
+- **Axios** for HTTP requests
+
+## Setup Instructions
+
+1. **Clone and Install**
+   ```bash
+   npm install
+   ```
+
+2. **Environment Configuration**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your API URL
+   ```
+
+3. **Development Server**
+   ```bash
+   npm run dev
+   ```
+
+4. **Build for Production**
+   ```bash
+   npm run build
+   ```
+
+## Project Structure
+
+```
+src/
+├── views/              # Main pages
+├── components/
+│   ├── features/       # Feature-specific components
+│   ├── ui/            # Reusable UI components
+│   └── shared/        # Shared components
+├── stores/            # Pinia state management
+├── services/          # API service layer
+├── composables/       # Vue composition functions
+├── utils/             # Helper utilities
+└── assets/           # Static assets
+```
+
+## Backend Integration
+
+This frontend is designed to work with the StudHelper FastAPI backend. Make sure to:
+
+1. Set the correct API URL in `.env`
+2. Ensure CORS is configured in your backend
+3. The backend should be running on the specified port
+
+## Development
+
+- Uses Vue 3 Composition API
+- Tailwind CSS for styling
+- Component-based architecture
+- Modular service layer for API calls
+- Centralized state management with Pinia
+
+### NEW FILE: src/components/ui/ModalManager.vue
+<template>
+  <div>
+    <!-- Render active modal -->
+    <component
+      v-if="activeModal"
+      :is="activeModal.name"
+      v-bind="activeModal.props"
+      @close="closeModal"
+    />
+  </div>
+</template>
+
+<script setup>
+import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useUIStore } from '@/stores/ui'
+
+// Import modal components
+import CreateClassModal from '@/components/features/class-management/modals/CreateClassWizard/index.vue'
+
+const uiStore = useUIStore()
+const { activeModal } = storeToRefs(uiStore)
+
+const closeModal = () => {
+  uiStore.closeModal()
+}
+
+// Register modal components
+const modalComponents = {
+  CreateClassModal
+}
+</script>
+
+### NEW FILE: src/components/ui/SlideOutManager.vue
+<template>
+  <div>
+    <!-- Render active slide-out -->
+    <component
+      v-if="activeSlideOut"
+      :is="activeSlideOut.name"
+      v-bind="activeSlideOut.props"
+      @close="closeSlideOut"
+    />
+  </div>
+</template>
+
+<script setup>
+import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useUIStore } from '@/stores/ui'
+
+// Import slide-out components
+import ClassInfoPanel from '@/components/features/class-management/panels/ClassInfoPanel.vue'
+import UserSettingsPanel from '@/components/features/user-account/panels/UserSettingsPanel.vue'
+import QuickUsagePanel from '@/components/features/user-account/panels/QuickUsagePanel.vue'
+
+const uiStore = useUIStore()
+const { activeSlideOut } = storeToRefs(uiStore)
+
+const closeSlideOut = () => {
+  uiStore.closeSlideOut()
+}
+
+// Register slide-out components
+const slideOutComponents = {
+  ClassInfoPanel,
+  UserSettingsPanel,
+  QuickUsagePanel
+}
+</script>
+
+### NEW FILE: src/components/features/class-management/modals/CreateClassWizard/index.vue
+<template>
+  <ModalWrapper :is-visible="true" @close="$emit('close')">
+    <div class="flex flex-col h-full max-h-[90vh]">
+      <!-- Header -->
+      <div class="flex items-center justify-between p-6 border-b border-gray-200">
+        <div>
+          <h2 class="text-2xl font-bold text-gray-900">Create New Class</h2>
+          <p class="text-gray-600 mt-1">Step {{ currentStep }} of 3</p>
+        </div>
+        <button @click="$emit('close')" class="p-2 hover:bg-gray-100 rounded-lg">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Progress Bar -->
+      <div class="px-6 py-4 bg-gray-50">
+        <div class="flex items-center">
+          <div
+            v-for="step in 3"
+            :key="step"
+            class="flex items-center"
+          >
+            <div
+              :class="[
+                'w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium',
+                step <= currentStep ? 'bg-primary-600 text-white' : 'bg-gray-300 text-gray-600'
+              ]"
+            >
+              {{ step }}
+            </div>
+            <div
+              v-if="step < 3"
+              :class="[
+                'w-16 h-1 mx-2',
+                step < currentStep ? 'bg-primary-600' : 'bg-gray-300'
+              ]"
+            ></div>
+          </div>
+        </div>
+        <div class="flex justify-between mt-2 text-sm">
+          <span :class="currentStep >= 1 ? 'text-primary-600 font-medium' : 'text-gray-500'">
+            Knowledge Upload
+          </span>
+          <span :class="currentStep >= 2 ? 'text-primary-600 font-medium' : 'text-gray-500'">
+            Permissions
+          </span>
+          <span :class="currentStep >= 3 ? 'text-primary-600 font-medium' : 'text-gray-500'">
+            Billing Settings
+          </span>
+        </div>
+      </div>
+
+      <!-- Step Content -->
+      <div class="flex-1 overflow-y-auto">
+        <StepKnowledge
+          v-if="currentStep === 1"
+          v-model="formData.knowledge"
+          :errors="errors.knowledge"
+        />
+        <StepPermissions
+          v-if="currentStep === 2"
+          v-model="formData.permissions"
+          :errors="errors.permissions"
+        />
+        <StepBilling
+          v-if="currentStep === 3"
+          v-model="formData.billing"
+          :errors="errors.billing"
+        />
+      </div>
+
+      <!-- Footer -->
+      <div class="flex items-center justify-between p-6 border-t border-gray-200 bg-gray-50">
+        <button
+          v-if="currentStep > 1"
+          @click="previousStep"
+          class="btn-secondary"
+        >
+          Previous
+        </button>
+        <div v-else></div>
+
+        <div class="flex space-x-3">
+          <button @click="$emit('close')" class="btn-secondary">
+            Cancel
+          </button>
+          <button
+            v-if="currentStep < 3"
+            @click="nextStep"
+            :disabled="!canProceed"
+            class="btn-primary"
+          >
+            Next
+          </button>
+          <button
+            v-else
+            @click="createClass"
+            :disabled="isCreating || !canProceed"
+            class="btn-primary"
+          >
+            <span v-if="isCreating">Creating...</span>
+            <span v-else>Create Class</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </ModalWrapper>
+</template>
+
+<script setup>
+import { ref, computed } from 'vue'
+import { useClassStore } from '@/stores/classes'
+import ModalWrapper from '@/components/ui/ModalWrapper.vue'
+import StepKnowledge from './StepKnowledge.vue'
+import StepPermissions from './StepPermissions.vue'
+import StepBilling from './StepBilling.vue'
+
+const emit = defineEmits(['close'])
+
+const classStore = useClassStore()
+
+const currentStep = ref(1)
+const isCreating = ref(false)
+
+const formData = ref({
+  knowledge: {
+    name: '',
+    description: '',
+    documents: []
+  },
+  permissions: {
+    isPublic: false,
+    allowGuests: false,
+    maxMembers: 50,
+    defaultRole: 'reader'
+  },
+  billing: {
+    tokenLimit: 1000,
+    costCenter: '',
+    sponsorshipEnabled: false
+  }
+})
+
+const errors = ref({
+  knowledge: {},
+  permissions: {},
+  billing: {}
+})
+
+const canProceed = computed(() => {
+  switch (currentStep.value) {
+    case 1:
+      return formData.value.knowledge.name.trim().length > 0
+    case 2:
+      return true // Permissions have defaults
+    case 3:
+      return formData.value.billing.tokenLimit > 0
+    default:
+      return false
+  }
+})
+
+const nextStep = () => {
+  if (canProceed.value && currentStep.value < 3) {
+    currentStep.value++
+  }
+}
+
+const previousStep = () => {
+  if (currentStep.value > 1) {
+    currentStep.value--
+  }
+}
+
+const createClass = async () => {
+  isCreating.value = true
+  
+  try {
+    const classData = {
+      name: formData.value.knowledge.name,
+      description: formData.value.knowledge.description,
+      // Add other fields as needed for your API
+    }
+    
+    const result = await classStore.createClass(classData)
+    
+    if (result.success) {
+      emit('close')
+    } else {
+      // Handle error
+      console.error('Failed to create class:', result.message)
+    }
+  } catch (error) {
+    console.error('Error creating class:', error)
+  } finally {
+    isCreating.value = false
+  }
+}
+</script>
+
+### NEW FILE: src/components/features/class-management/modals/CreateClassWizard/StepKnowledge.vue
+<template>
+  <div class="p-6 space-y-6">
+    <div>
+      <h3 class="text-lg font-semibold text-gray-900 mb-4">Class Information & Knowledge Base</h3>
+      <p class="text-gray-600 mb-6">
+        Set up your class details and upload initial study materials.
+      </p>
+    </div>
+
+    <!-- Basic Information -->
+    <div class="space-y-4">
+      <div>
+        <label for="className" class="block text-sm font-medium text-gray-700 mb-1">
+          Class Name *
+        </label>
+        <input
+          id="className"
+          v-model="localValue.name"
+          type="text"
+          required
+          class="input-field"
+          placeholder="e.g., Biology 101, Spanish Literature"
+        />
+        <p v-if="errors.name" class="text-red-600 text-sm mt-1">{{ errors.name }}</p>
+      </div>
+
+      <div>
+        <label for="classDescription" class="block text-sm font-medium text-gray-700 mb-1">
+          Description
+        </label>
+        <textarea
+          id="classDescription"
+          v-model="localValue.description"
+          rows="3"
+          class="input-field"
+          placeholder="Brief description of what this class covers..."
+        ></textarea>
+      </div>
+    </div>
+
+    <!-- Document Upload -->
+    <div>
+      <h4 class="font-medium text-gray-900 mb-3">Initial Study Materials</h4>
+      <p class="text-sm text-gray-600 mb-4">
+        Upload documents to create your knowledge base. You can add more later.
+      </p>
+      
+      <div class="border-2 border-dashed border-gray-300 rounded-lg p-8">
+        <div class="text-center">
+          <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+            <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <div class="mt-4">
+            <label for="file-upload" class="cursor-pointer">
+              <span class="mt-2 block text-sm font-medium text-gray-900">
+                Upload files or drag and drop
+              </span>
+              <span class="mt-1 block text-sm text-gray-600">
+                PDF, DOC, DOCX, PPT, PPTX up to 10MB each
+              </span>
+              <input id="file-upload" name="file-upload" type="file" class="sr-only" multiple accept=".pdf,.doc,.docx,.ppt,.pptx" @change="handleFileUpload">
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Uploaded Files List -->
+      <div v-if="localValue.documents.length > 0" class="mt-4 space-y-2">
+        <h5 class="font-medium text-gray-900">Uploaded Files:</h5>
+        <div
+          v-for="(file, index) in localValue.documents"
+          :key="index"
+          class="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+        >
+          <div class="flex items-center space-x-3">
+            <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+            <span class="text-sm text-gray-900">{{ file.name }}</span>
+            <span class="text-xs text-gray-500">({{ formatFileSize(file.size) }})</span>
+          </div>
+          <button
+            @click="removeFile(index)"
+            class="text-red-600 hover:text-red-800"
+          >
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- YouTube URL -->
+      <div class="mt-6">
+        <label for="youtubeUrl" class="block text-sm font-medium text-gray-700 mb-1">
+          YouTube Video URL (optional)
+        </label>
+        <input
+          id="youtubeUrl"
+          v-model="youtubeUrl"
+          type="url"
+          class="input-field"
+          placeholder="https://www.youtube.com/watch?v=..."
+        />
+        <button
+          v-if="youtubeUrl"
+          @click="addYouTubeVideo"
+          class="mt-2 btn-secondary text-sm"
+        >
+          Add Video
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed } from 'vue'
+
+const props = defineProps({
+  modelValue: {
+    type: Object,
+    default: () => ({
+      name: '',
+      description: '',
+      documents: []
+    })
+  },
+  errors: {
+    type: Object,
+    default: () => ({})
+  }
+})
+
+const emit = defineEmits(['update:modelValue'])
+
+const youtubeUrl = ref('')
+
+const localValue = computed({
+  get: () => props.modelValue,
+  set: (value) => emit('update:modelValue', value)
+})
+
+const handleFileUpload = (event) => {
+  const files = Array.from(event.target.files)
+  localValue.value = {
+    ...localValue.value,
+    documents: [...localValue.value.documents, ...files]
+  }
+}
+
+const removeFile = (index) => {
+  const documents = [...localValue.value.documents]
+  documents.splice(index, 1)
+  localValue.value = {
+    ...localValue.value,
+    documents
+  }
+}
+
+const addYouTubeVideo = () => {
+  if (youtubeUrl.value) {
+    const videoData = {
+      name: `YouTube Video: ${youtubeUrl.value}`,
+      type: 'youtube',
+      url: youtubeUrl.value,
+      size: 0
+    }
+    localValue.value = {
+      ...localValue.value,
+      documents: [...localValue.value.documents, videoData]
+    }
+    youtubeUrl.value = ''
+  }
+}
+
+const formatFileSize = (bytes) => {
+  if (bytes === 0) return '0 Bytes'
+  const k = 1024
+  const sizes = ['Bytes', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+</script>
+
+### NEW FILE: src/components/features/class-management/modals/CreateClassWizard/StepPermissions.vue
+<template>
+  <div class="p-6 space-y-6">
+    <div>
+      <h3 class="text-lg font-semibold text-gray-900 mb-4">Class Permissions & Access</h3>
+      <p class="text-gray-600 mb-6">
+        Configure who can access your class and what they can do.
+      </p>
+    </div>
+
+    <!-- Class Visibility -->
+    <div class="space-y-4">
+      <h4 class="font-medium text-gray-900">Class Visibility</h4>
+      
+      <div class="space-y-3">
+        <label class="flex items-start space-x-3">
+          <input
+            v-model="localValue.isPublic"
+            type="radio"
+            :value="false"
+            class="mt-1"
+          />
+          <div>
+            <div class="font-medium text-gray-900">Private Class</div>
+            <div class="text-sm text-gray-600">Only invited members can access this class</div>
+          </div>
+        </label>
+        
+        <label class="flex items-start space-x-3">
+          <input
+            v-model="localValue.isPublic"
+            type="radio"
+            :value="true"
+            class="mt-1"
+          />
+          <div>
+            <div class="font-medium text-gray-900">Public Class</div>
+            <div class="text-sm text-gray-600">Anyone with the class code can join</div>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Guest Access -->
+    <div class="space-y-4">
+      <h4 class="font-medium text-gray-900">Guest Access</h4>
+      
+      <label class="flex items-center space-x-3">
+        <input
+          v-model="localValue.allowGuests"
+          type="checkbox"
+          class="rounded"
+        />
+        <div>
+          <div class="font-medium text-gray-900">Allow guest users</div>
+          <div class="text-sm text-gray-600">Let non-registered users participate with limited access</div>
+        </div>
+      </label>
+    </div>
+
+    <!-- Member Limits -->
+    <div class="space-y-4">
+      <h4 class="font-medium text-gray-900">Member Management</h4>
+      
+      <div>
+        <label for="maxMembers" class="block text-sm font-medium text-gray-700 mb-1">
+          Maximum Members
+        </label>
+        <select
+          id="maxMembers"
+          v-model="localValue.maxMembers"
+          class="input-field"
+        >
+          <option value="10">10 members</option>
+          <option value="25">25 members</option>
+          <option value="50">50 members</option>
+          <option value="100">100 members</option>
+          <option value="unlimited">Unlimited</option>
+        </select>
+      </div>
+
+      <div>
+        <label for="defaultRole" class="block text-sm font-medium text-gray-700 mb-1">
+          Default Role for New Members
+        </label>
+        <select
+          id="defaultRole"
+          v-model="localValue.defaultRole"
+          class="input-field"
+        >
+          <option value="reader">Reader - Can view and chat only</option>
+          <option value="contributor">Contributor - Can upload documents</option>
+          <option value="manager">Manager - Can manage class settings</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Permissions Preview -->
+    <div class="bg-gray-50 p-4 rounded-lg">
+      <h5 class="font-medium text-gray-900 mb-3">Permission Summary</h5>
+      <div class="space-y-2 text-sm">
+        <div class="flex items-center space-x-2">
+          <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+          <span>Class is {{ localValue.isPublic ? 'public' : 'private' }}</span>
+        </div>
+        <div class="flex items-center space-x-2">
+          <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
+          <span>{{ localValue.allowGuests ? 'Guests allowed' : 'No guest access' }}</span>
+        </div>
+        <div class="flex items-center space-x-2">
+          <div class="w-2 h-2 bg-purple-500 rounded-full"></div>
+          <span>Max {{ localValue.maxMembers }} members</span>
+        </div>
+        <div class="flex items-center space-x-2">
+          <div class="w-2 h-2 bg-orange-500 rounded-full"></div>
+          <span>New members join as {{ localValue.defaultRole }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { computed } from 'vue'
+
+const props = defineProps({
+  modelValue: {
+    type: Object,
+    default: () => ({
+      isPublic: false,
+      allowGuests: false,
+      maxMembers: 50,
+      defaultRole: 'reader'
+    })
+  },
+  errors: {
+    type: Object,
+    default: () => ({})
+  }
+})
+
+const emit = defineEmits(['update:modelValue'])
+
+const localValue = computed({
+  get: () => props.modelValue,
+  set: (value) => emit('update:modelValue', value)
+})
+</script>
+
+### NEW FILE: src/components/features/class-management/modals/CreateClassWizard/StepBilling.vue
+<template>
+  <div class="p-6 space-y-6">
+    <div>
+      <h3 class="text-lg font-semibold text-gray-900 mb-4">Usage Limits & Billing</h3>
+      <p class="text-gray-600 mb-6">
+        Set AI usage limits and configure billing settings for this class.
+      </p>
+    </div>
+
+    <!-- Token Limits -->
+    <div class="space-y-4">
+      <h4 class="font-medium text-gray-900">AI Usage Limits</h4>
+      
+      <div>
+        <label for="tokenLimit" class="block text-sm font-medium text-gray-700 mb-1">
+          Daily Token Limit per User
+        </label>
+        <select
+          id="tokenLimit"
+          v-model="localValue.tokenLimit"
+          class="input-field"
+        >
+          <option value="500">500 tokens (Basic)</option>
+          <option value="1000">1,000 tokens (Standard)</option>
+          <option value="2500">2,500 tokens (Advanced)</option>
+          <option value="5000">5,000 tokens (Premium)</option>
+          <option value="unlimited">Unlimited</option>
+        </select>
+        <p class="text-sm text-gray-600 mt-1">
+          Approximately {{ Math.round(localValue.tokenLimit / 4) }} words of AI responses per day
+        </p>
+      </div>
+    </div>
+
+    <!-- Cost Management -->
+    <div class="space-y-4">
+      <h4 class="font-medium text-gray-900">Cost Management</h4>
+      
+      <div>
+        <label for="costCenter" class="block text-sm font-medium text-gray-700 mb-1">
+          Cost Center (optional)
+        </label>
+        <input
+          id="costCenter"
+          v-model="localValue.costCenter"
+          type="text"
+          class="input-field"
+          placeholder="Department or project code for billing"
+        />
+      </div>
+
+      <div class="space-y-3">
+        <label class="flex items-start space-x-3">
+          <input
+            v-model="localValue.sponsorshipEnabled"
+            type="checkbox"
+            class="mt-1 rounded"
+          />
+          <div>
+            <div class="font-medium text-gray-900">Enable User Sponsorship</div>
+            <div class="text-sm text-gray-600">
+              Allow class managers to sponsor other users' AI usage
+            </div>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Usage Monitoring -->
+    <div class="space-y-4">
+      <h4 class="font-medium text-gray-900">Monitoring & Alerts</h4>
+      
+      <div class="space-y-3">
+        <label class="flex items-center space-x-3">
+          <input
+            v-model="localValue.usageAlerts"
+            type="checkbox"
+            class="rounded"
+          />
+          <span class="text-gray-900">Send usage alerts at 80% of limit</span>
+        </label>
+        
+        <label class="flex items-center space-x-3">
+          <input
+            v-model="localValue.weeklyReports"
+            type="checkbox"
+            class="rounded"
+          />
+          <span class="text-gray-900">Weekly usage reports</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Billing Summary -->
+    <div class="bg-blue-50 p-4 rounded-lg">
+      <h5 class="font-medium text-gray-900 mb-3">Estimated Costs</h5>
+      <div class="space-y-2 text-sm">
+        <div class="flex justify-between">
+          <span>Daily cost per user ({{ localValue.tokenLimit }} tokens):</span>
+          <span class="font-medium">${{ (localValue.tokenLimit * 0.0001).toFixed(3) }}</span>
+        </div>
+        <div class="flex justify-between">
+          <span>Monthly cost per user:</span>
+          <span class="font-medium">${{ (localValue.tokenLimit * 0.0001 * 30).toFixed(2) }}</span>
+        </div>
+        <div class="border-t border-blue-200 pt-2 mt-2">
+          <div class="flex justify-between font-medium">
+            <span>Estimated monthly cost (10 active users):</span>
+            <span>${{ (localValue.tokenLimit * 0.0001 * 30 * 10).toFixed(2) }}</span>
+          </div>
+        </div>
+      </div>
+      <p class="text-xs text-gray-600 mt-2">
+        Actual costs may vary based on usage patterns and AI model pricing.
+      </p>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { computed } from 'vue'
+
+const props = defineProps({
+  modelValue: {
+    type: Object,
+    default: () => ({
+      tokenLimit: 1000,
+      costCenter: '',
+      sponsorshipEnabled: false,
+      usageAlerts: true,
+      weeklyReports: false
+    })
+  },
+  errors: {
+    type: Object,
+    default: () => ({})
+  }
+})
+
+const emit = defineEmits(['update:modelValue'])
+
+const localValue = computed({
+  get: () => props.modelValue,
+  set: (value) => emit('update:modelValue', value)
+})
+</script>
+
+### NEW FILE: src/components/features/class-management/panels/ClassInfoPanel.vue
+<template>
+  <SlideOutWrapper :is-visible="true" @close="$emit('close')">
+    <div class="h-full flex flex-col">
+      <!-- Header -->
+      <div class="flex items-center justify-between p-6 border-b border-gray-200">
+        <h2 class="text-xl font-semibold text-gray-900">Class Information</h2>
+        <button @click="$emit('close')" class="p-2 hover:bg-gray-100 rounded-lg">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Content -->
+      <div class="flex-1 overflow-y-auto p-6 space-y-6">
+        <!-- Basic Info -->
+        <div>
+          <h3 class="font-medium text-gray-900 mb-3">{{ classItem.name }}</h3>
+          <p class="text-gray-600 text-sm mb-4">{{ classItem.description || 'No description provided' }}</p>
+          
+          <div class="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <span class="text-gray-500">Created:</span>
+              <span class="ml-2 text-gray-900">{{ formatDate(classItem.created_at) }}</span>
+            </div>
+            <div>
+              <span class="text-gray-500">Members:</span>
+              <span class="ml-2 text-gray-900">{{ classItem.member_count || 0 }}</span>
+            </div>
+            <div>
+              <span class="text-gray-500">Chats:</span>
+              <span class="ml-2 text-gray-900">{{ classItem.chats?.length || 0 }}</span>
+            </div>
+            <div>
+              <span class="text-gray-500">Owner:</span>
+              <span class="ml-2 text-gray-900">{{ classItem.owner_name || 'You' }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Class Code -->
+        <div class="bg-gray-50 p-4 rounded-lg">
+          <h4 class="font-medium text-gray-900 mb-2">Class Code</h4>
+          <div class="flex items-center justify-between">
+            <code class="bg-white px-3 py-2 rounded border text-lg font-mono">
+              {{ classItem.class_code || 'ABC123' }}
+            </code>
+            <button
+              @click="copyClassCode"
+              class="btn-secondary text-sm"
+            >
+              Copy
+            </button>
+          </div>
+          <p class="text-sm text-gray-600 mt-2">
+            Share this code with others to let them join your class
+          </p>
+        </div>
+
+        <!-- Documents -->
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <h4 class="font-medium text-gray-900">Documents</h4>
+            <button class="btn-secondary text-sm">
+              Upload New
+            </button>
+          </div>
+          
+          <div v-if="mockDocuments.length === 0" class="text-center py-8 text-gray-500">
+            <svg class="w-12 h-12 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+            </svg>
+            <p>No documents uploaded yet</p>
+          </div>
+          
+          <div v-else class="space-y-2">
+            <div
+              v-for="doc in mockDocuments"
+              :key="doc.id"
+              class="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+            >
+              <div class="flex items-center space-x-3">
+                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+                <div>
+                  <p class="text-sm font-medium text-gray-900">{{ doc.name }}</p>
+                  <p class="text-xs text-gray-500">{{ doc.type }} • {{ doc.size }}</p>
+                </div>
+              </div>
+              <button class="text-gray-400 hover:text-red-600">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div>
+          <h4 class="font-medium text-gray-900 mb-3">Recent Activity</h4>
+          <div class="space-y-3">
+            <div
+              v-for="activity in mockActivity"
+              :key="activity.id"
+              class="flex items-start space-x-3"
+            >
+              <div class="w-2 h-2 bg-primary-500 rounded-full mt-2"></div>
+              <div class="flex-1">
+                <p class="text-sm text-gray-900">{{ activity.description }}</p>
+                <p class="text-xs text-gray-500">{{ activity.time }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer Actions -->
+      <div class="border-t border-gray-200 p-6">
+        <div class="flex space-x-3">
+          <button class="btn-secondary flex-1">
+            Class Settings
+          </button>
+          <button class="btn-primary flex-1">
+            Invite Members
+          </button>
+        </div>
+      </div>
+    </div>
+  </SlideOutWrapper>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import SlideOutWrapper from '@/components/ui/SlideOutWrapper.vue'
+
+const props = defineProps({
+  classItem: {
+    type: Object,
+    required: true
+  }
+})
+
+const emit = defineEmits(['close'])
+
+// Mock data - replace with real API calls
+const mockDocuments = ref([
+  { id: 1, name: 'Chapter 1 - Introduction.pdf', type: 'PDF', size: '2.4 MB' },
+  { id: 2, name: 'Lecture Notes.docx', type: 'Word', size: '1.1 MB' }
+])
+
+const mockActivity = ref([
+  { id: 1, description: 'New chat session started', time: '2 hours ago' },
+  { id: 2, description: 'Document uploaded: Chapter 1.pdf', time: '1 day ago' },
+  { id: 3, description: 'Member joined the class', time: '2 days ago' }
+])
+
+const formatDate = (dateString) => {
+  if (!dateString) return 'Unknown'
+  return new Date(dateString).toLocaleDateString()
+}
+
+const copyClassCode = () => {
+  const code = props.classItem.class_code || 'ABC123'
+  navigator.clipboard.writeText(code)
+  // You could add a toast notification here
+}
+</script>
+
+### NEW FILE: src/components/features/user-account/panels/UserSettingsPanel.vue
+<template>
+  <SlideOutWrapper :is-visible="true" @close="$emit('close')">
+    <div class="h-full flex flex-col">
+      <!-- Header -->
+      <div class="flex items-center justify-between p-6 border-b border-gray-200">
+        <h2 class="text-xl font-semibold text-gray-900">User Settings</h2>
+        <button @click="$emit('close')" class="p-2 hover:bg-gray-100 rounded-lg">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Content -->
+      <div class="flex-1 overflow-y-auto p-6 space-y-6">
+        <!-- Profile Information -->
+        <div>
+          <h3 class="font-medium text-gray-900 mb-4">Profile Information</h3>
+          <div class="space-y-4">
+            <div>
+              <label for="fullName" class="block text-sm font-medium text-gray-700 mb-1">
+                Full Name
+              </label>
+              <input
+                id="fullName"
+                v-model="profile.fullName"
+                type="text"
+                class="input-field"
+              />
+            </div>
+            
+            <div>
+              <label for="email" class="block text-sm font-medium text-gray-700 mb-1">
+                Email
+              </label>
+              <input
+                id="email"
+                v-model="profile.email"
+                type="email"
+                class="input-field"
+                disabled
+              />
+              <p class="text-sm text-gray-500 mt-1">Email cannot be changed</p>
+            </div>
+            
+            <div>
+              <label for="username" class="block text-sm font-medium text-gray-700 mb-1">
+                Username
+              </label>
+              <input
+                id="username"
+                v-model="profile.username"
+                type="text"
+                class="input-field"
+              />
+            </div>
+          </div>
+        </div>
+
+        <!-- Preferences -->
+        <div>
+          <h3 class="font-medium text-gray-900 mb-4">Preferences</h3>
+          <div class="space-y-4">
+            <div>
+              <label for="language" class="block text-sm font-medium text-gray-700 mb-1">
+                Language
+              </label>
+              <select
+                id="language"
+                v-model="preferences.language"
+                class="input-field"
+              >
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+              </select>
+            </div>
+            
+            <div>
+              <label for="timezone" class="block text-sm font-medium text-gray-700 mb-1">
+                Timezone
+              </label>
+              <select
+                id="timezone"
+                v-model="preferences.timezone"
+                class="input-field"
+              >
+                <option value="UTC">UTC</option>
+                <option value="America/New_York">Eastern Time</option>
+                <option value="America/Chicago">Central Time</option>
+                <option value="America/Denver">Mountain Time</option>
+                <option value="America/Los_Angeles">Pacific Time</option>
+                <option value="Europe/Madrid">Madrid Time</option>
+              </select>
+            </div>
+            
+            <div>
+              <label for="theme" class="block text-sm font-medium text-gray-700 mb-1">
+                Theme
+              </label>
+              <select
+                id="theme"
+                v-model="preferences.theme"
+                class="input-field"
+              >
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+                <option value="auto">Auto (System)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Notifications -->
+        <div>
+          <h3 class="font-medium text-gray-900 mb-4">Notifications</h3>
+          <div class="space-y-3">
+            <label class="flex items-center space-x-3">
+              <input
+                v-model="notifications.emailUpdates"
+                type="checkbox"
+                class="rounded"
+              />
+              <span class="text-gray-900">Email updates</span>
+            </label>
+            
+            <label class="flex items-center space-x-3">
+              <input
+                v-model="notifications.usageAlerts"
+                type="checkbox"
+                class="rounded"
+              />
+              <span class="text-gray-900">Usage limit alerts</span>
+            </label>
+            
+            <label class="flex items-center space-x-3">
+              <input
+                v-model="notifications.weeklyReports"
+                type="checkbox"
+                class="rounded"
+              />
+              <span class="text-gray-900">Weekly activity reports</span>
+            </label>
+            
+            <label class="flex items-center space-x-3">
+              <input
+                v-model="notifications.newFeatures"
+                type="checkbox"
+                class="rounded"
+              />
+              <span class="text-gray-900">New feature announcements</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- AI Preferences -->
+        <div>
+          <h3 class="font-medium text-gray-900 mb-4">AI Assistant Preferences</h3>
+          <div class="space-y-4">
+            <div>
+              <label for="responseStyle" class="block text-sm font-medium text-gray-700 mb-1">
+                Response Style
+              </label>
+              <select
+                id="responseStyle"
+                v-model="aiPreferences.responseStyle"
+                class="input-field"
+              >
+                <option value="concise">Concise</option>
+                <option value="detailed">Detailed</option>
+                <option value="balanced">Balanced</option>
+              </select>
+            </div>
+            
+            <div>
+              <label for="academicLevel" class="block text-sm font-medium text-gray-700 mb-1">
+                Academic Level
+              </label>
+              <select
+                id="academicLevel"
+                v-model="aiPreferences.academicLevel"
+                class="input-field"
+              >
+                <option value="high-school">High School</option>
+                <option value="undergraduate">Undergraduate</option>
+                <option value="graduate">Graduate</option>
+                <option value="professional">Professional</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Data & Privacy -->
+        <div>
+          <h3 class="font-medium text-gray-900 mb-4">Data & Privacy</h3>
+          <div class="space-y-3">
+            <label class="flex items-center space-x-3">
+              <input
+                v-model="privacy.improveService"
+                type="checkbox"
+                class="rounded"
+              />
+              <span class="text-gray-900">Help improve service with usage data</span>
+            </label>
+            
+            <label class="flex items-center space-x-3">
+              <input
+                v-model="privacy.shareAnonymous"
+                type="checkbox"
+                class="rounded"
+              />
+              <span class="text-gray-900">Share anonymous analytics</span>
+            </label>
+          </div>
+          
+          <div class="mt-6 pt-6 border-t border-gray-200">
+            <button class="text-red-600 hover:text-red-800 text-sm font-medium">
+              Download My Data
+            </button>
+            <br>
+            <button class="text-red-600 hover:text-red-800 text-sm font-medium mt-2">
+              Delete Account
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="border-t border-gray-200 p-6">
+        <div class="flex justify-end space-x-3">
+          <button @click="$emit('close')" class="btn-secondary">
+            Cancel
+          </button>
+          <button @click="saveSettings" class="btn-primary">
+            Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  </SlideOutWrapper>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useAuthStore } from '@/stores/auth'
+import SlideOutWrapper from '@/components/ui/SlideOutWrapper.vue'
+
+const emit = defineEmits(['close'])
+
+const authStore = useAuthStore()
+const { user } = storeToRefs(authStore)
+
+// Form data
+const profile = ref({
+  fullName: user.value?.full_name || '',
+  email: user.value?.email || '',
+  username: user.value?.username || ''
+})
+
+const preferences = ref({
+  language: 'en',
+  timezone: 'UTC',
+  theme: 'light'
+})
+
+const notifications = ref({
+  emailUpdates: true,
+  usageAlerts: true,
+  weeklyReports: false,
+  newFeatures: true
+})
+
+const aiPreferences = ref({
+  responseStyle: 'balanced',
+  academicLevel: 'undergraduate'
+})
+
+const privacy = ref({
+  improveService: true,
+  shareAnonymous: false
+})
+
+const saveSettings = async () => {
+  try {
+    // Here you would call your API to save settings
+    console.log('Saving settings...', {
+      profile: profile.value,
+      preferences: preferences.value,
+      notifications: notifications.value,
+      aiPreferences: aiPreferences.value,
+      privacy: privacy.value
+    })
+    
+    // Show success message
+    emit('close')
+  } catch (error) {
+    console.error('Failed to save settings:', error)
+  }
+}
+</script>
+
+### NEW FILE: src/components/features/user-account/panels/QuickUsagePanel.vue
+<template>
+  <SlideOutWrapper :is-visible="true" @close="$emit('close')">
+    <div class="h-full flex flex-col">
+      <!-- Header -->
+      <div class="flex items-center justify-between p-6 border-b border-gray-200">
+        <h2 class="text-xl font-semibold text-gray-900">Usage Overview</h2>
+        <div class="flex items-center space-x-2">
+          <router-link
+            to="/usage-analytics"
+            class="text-primary-600 hover:text-primary-700 text-sm font-medium"
+          >
+            Detailed View
+          </router-link>
+          <button @click="$emit('close')" class="p-2 hover:bg-gray-100 rounded-lg">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Content -->
+      <div class="flex-1 overflow-y-auto p-6 space-y-6">
+        <!-- Current Usage -->
+        <div>
+          <h3 class="font-medium text-gray-900 mb-4">Today's Usage</h3>
+          
+          <!-- Daily Limit Progress -->
+          <div class="bg-gray-50 p-4 rounded-lg">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-sm font-medium text-gray-700">AI Tokens Used</span>
+              <span class="text-sm text-gray-600">{{ usageData.daily.used }} / {{ usageData.daily.limit }}</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-2">
+              <div
+                class="bg-primary-600 h-2 rounded-full transition-all duration-300"
+                :style="{ width: `${Math.min((usageData.daily.used / usageData.daily.limit) * 100, 100)}%` }"
+              ></div>
+            </div>
+            <p class="text-xs text-gray-600 mt-2">
+              {{ usageData.daily.limit - usageData.daily.used }} tokens remaining today
+            </p>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4 mt-4">
+            <div class="bg-blue-50 p-3 rounded-lg">
+              <div class="text-lg font-semibold text-blue-900">{{ usageData.daily.chats }}</div>
+              <div class="text-sm text-blue-700">Chat Sessions</div>
+            </div>
+            <div class="bg-green-50 p-3 rounded-lg">
+              <div class="text-lg font-semibold text-green-900">{{ usageData.daily.messages }}</div>
+              <div class="text-sm text-green-700">Messages Sent</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Weekly Overview -->
+        <div>
+          <h3 class="font-medium text-gray-900 mb-4">This Week</h3>
+          
+          <div class="bg-gray-50 p-4 rounded-lg">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-sm font-medium text-gray-700">Weekly Usage</span>
+              <span class="text-sm text-gray-600">{{ usageData.weekly.used }} / {{ usageData.weekly.limit }}</span>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-2">
+              <div
+                class="bg-orange-500 h-2 rounded-full transition-all duration-300"
+                :style="{ width: `${Math.min((usageData.weekly.used / usageData.weekly.limit) * 100, 100)}%` }"
+              ></div>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4 mt-4">
+            <div class="bg-purple-50 p-3 rounded-lg">
+              <div class="text-lg font-semibold text-purple-900">${{ usageData.weekly.cost.toFixed(2) }}</div>
+              <div class="text-sm text-purple-700">Estimated Cost</div>
+            </div>
+            <div class="bg-indigo-50 p-3 rounded-lg">
+              <div class="text-lg font-semibold text-indigo-900">{{ usageData.weekly.avgDaily }}</div>
+              <div class="text-sm text-indigo-700">Avg Daily Usage</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Usage by Class -->
+        <div>
+          <h3 class="font-medium text-gray-900 mb-4">Usage by Class</h3>
+          
+          <div class="space-y-3">
+            <div
+              v-for="classUsage in usageData.byClass"
+              :key="classUsage.id"
+              class="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+            >
+              <div>
+                <div class="font-medium text-gray-900">{{ classUsage.name }}</div>
+                <div class="text-sm text-gray-600">{{ classUsage.messages }} messages</div>
+              </div>
+              <div class="text-right">
+                <div class="font-medium text-gray-900">{{ classUsage.tokens }}</div>
+                <div class="text-sm text-gray-600">tokens</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div>
+          <h3 class="font-medium text-gray-900 mb-4">Quick Actions</h3>
+          
+          <div class="space-y-2">
+            <button class="w-full flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">
+              <div class="flex items-center space-x-3">
+                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                </svg>
+                <span class="text-gray-900">View Detailed Analytics</span>
+              </div>
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+              </svg>
+            </button>
+            
+            <button class="w-full flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">
+              <div class="flex items-center space-x-3">
+                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <span class="text-gray-900">Usage History</span>
+              </div>
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+              </svg>
+            </button>
+            
+            <button class="w-full flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">
+              <div class="flex items-center space-x-3">
+                <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                </svg>
+                <span class="text-gray-900">Manage Limits</span>
+              </div>
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Alerts -->
+        <div v-if="usageData.alerts.length > 0">
+          <h3 class="font-medium text-gray-900 mb-4">Alerts</h3>
+          
+          <div class="space-y-2">
+            <div
+              v-for="alert in usageData.alerts"
+              :key="alert.id"
+              :class="[
+                'p-3 rounded-lg',
+                alert.type === 'warning' ? 'bg-yellow-50 border border-yellow-200' : 'bg-red-50 border border-red-200'
+              ]"
+            >
+              <div class="flex items-start space-x-2">
+                <svg 
+                  :class="[
+                    'w-5 h-5 mt-0.5',
+                    alert.type === 'warning' ? 'text-yellow-600' : 'text-red-600'
+                  ]"
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.996-.833-2.732 0L3.732 16.5c-.77.833.19 2.5 1.732 2.5z"></path>
+                </svg>
+                <div>
+                  <p :class="alert.type === 'warning' ? 'text-yellow-800' : 'text-red-800'" class="font-medium text-sm">
+                    {{ alert.title }}
+                  </p>
+                  <p :class="alert.type === 'warning' ? 'text-yellow-700' : 'text-red-700'" class="text-sm">
+                    {{ alert.message }}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </SlideOutWrapper>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import SlideOutWrapper from '@/components/ui/SlideOutWrapper.vue'
+
+const emit = defineEmits(['close'])
+
+// Mock usage data - replace with real API calls
+const usageData = ref({
+  daily: {
+    used: 750,
+    limit: 1000,
+    chats: 8,
+    messages: 24
+  },
+  weekly: {
+    used: 4200,
+    limit: 7000,
+    cost: 0.84,
+    avgDaily: 600
+  },
+  byClass: [
+    { id: 1, name: 'Biology 101', messages: 12, tokens: 320 },
+    { id: 2, name: 'Spanish Literature', messages: 8, tokens: 280 },
+    { id: 3, name: 'Data Science', messages: 4, tokens: 150 }
+  ],
+  alerts: [
+    {
+      id: 1,
+      type: 'warning',
+      title: 'High Usage Alert',
+      message: 'You have used 75% of your daily token limit.'
+    }
+  ]
+})
+</script>
+
+### NEW FILE: src/utils/constants.js
+export const API_ENDPOINTS = {
+  AUTH: {
+    LOGIN: '/auth/login',
+    REGISTER: '/auth/register',
+    LOGOUT: '/auth/logout',
+    ME: '/auth/me',
+    PROFILE: '/auth/profile'
+  },
+  CLASSES: {
+    LIST: '/classes',
+    CREATE: '/classes',
+    DETAIL: '/classes/{id}',
+    JOIN: '/classes/join',
+    MEMBERS: '/classes/{id}/members'
+  },
+  CHAT: {
+    SESSIONS: '/chat/sessions',
+    MESSAGES: '/chat/sessions/{id}/messages'
+  },
+  DOCUMENTS: {
+    CLASS_UPLOAD: '/documents/classes/{id}/upload',
+    CHAT_UPLOAD: '/documents/sessions/{id}/upload',
+    CLASS_LIST: '/documents/classes/{id}',
+    CHAT_LIST: '/documents/sessions/{id}',
+    DELETE: '/documents/{id}'
+  },
+  USAGE: {
+    MY_USAGE: '/usage/my-usage',
+    CLASS_USAGE: '/usage/classes/{id}/members',
+    LIMITS: '/usage/classes/{id}/limits'
+  }
+}
+
+export const FILE_TYPES = {
+  ACCEPTED: ['.pdf', '.doc', '.docx', '.ppt', '.pptx', '.txt'],
+  MAX_SIZE: 10 * 1024 * 1024, // 10MB
+  MIME_TYPES: {
+    'application/pdf': 'PDF',
+    'application/msword': 'Word',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word',
+    'application/vnd.ms-powerpoint': 'PowerPoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PowerPoint',
+    'text/plain': 'Text'
+  }
+}
+
+export const USER_ROLES = {
+  READER: 'reader',
+  CONTRIBUTOR: 'contributor',
+  MANAGER: 'manager',
+  OWNER: 'owner'
+}
+
+export const MODAL_NAMES = {
+  CREATE_CLASS: 'CreateClassModal',
+  CLASS_SETTINGS: 'ClassSettingsModal',
+  DOCUMENT_UPLOAD: 'DocumentUploadModal'
+}
+
+export const SLIDEOUT_NAMES = {
+  CLASS_INFO: 'ClassInfoPanel',
+  USER_SETTINGS: 'UserSettingsPanel',
+  QUICK_USAGE: 'QuickUsagePanel'
+}
+
+export const TOAST_TYPES = {
+  SUCCESS: 'success',
+  ERROR: 'error',
+  WARNING: 'warning',
+  INFO: 'info'
+}
+
+### NEW FILE: src/utils/validators.js
+export const validateEmail = (email) => {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  return re.test(email)
+}
+
+export const validatePassword = (password) => {
+  const errors = []
+  
+  if (password.length < 8) {
+    errors.push('Password must be at least 8 characters long')
+  }
+  
+  if (!/[A-Z]/.test(password)) {
+    errors.push('Password must contain at least one uppercase letter')
+  }
+  
+  if (!/[a-z]/.test(password)) {
+    errors.push('Password must contain at least one lowercase letter')
+  }
+  
+  if (!/[0-9]/.test(password)) {
+    errors.push('Password must contain at least one number')
+  }
+  
+  return {
+    isValid: errors.length === 0,
+    errors
+  }
+}
+
+export const validateUsername = (username) => {
+  if (username.length < 3) {
+    return { isValid: false, error: 'Username must be at least 3 characters long' }
+  }
+  
+  if (username.length > 20) {
+    return { isValid: false, error: 'Username must be less than 20 characters long' }
+  }
+  
+  if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+    return { isValid: false, error: 'Username can only contain letters, numbers, hyphens, and underscores' }
+  }
+  
+  return { isValid: true }
+}
+
+export const validateClassName = (name) => {
+  if (!name || name.trim().length === 0) {
+    return { isValid: false, error: 'Class name is required' }
+  }
+  
+  if (name.length < 3) {
+    return { isValid: false, error: 'Class name must be at least 3 characters long' }
+  }
+  
+  if (name.length > 100) {
+    return { isValid: false, error: 'Class name must be less than 100 characters long' }
+  }
+  
+  return { isValid: true }
+}
+
+export const validateFileUpload = (file) => {
+  const maxSize = 10 * 1024 * 1024 // 10MB
+  const allowedTypes = [
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-powerpoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'text/plain'
+  ]
+  
+  if (file.size > maxSize) {
+    return { isValid: false, error: 'File size must be less than 10MB' }
+  }
+  
+  if (!allowedTypes.includes(file.type)) {
+    return { isValid: false, error: 'File type not supported. Please upload PDF, Word, PowerPoint, or text files.' }
+  }
+  
+  return { isValid: true }
+}
+
+export const validateYouTubeUrl = (url) => {
+  const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})$/
+  
+  if (!youtubeRegex.test(url)) {
+    return { isValid: false, error: 'Please enter a valid YouTube URL' }
+  }
+  
+  return { isValid: true }
+}
+
+### NEW FILE: src/utils/formatters.js
+export const formatFileSize = (bytes) => {
+  if (bytes === 0) return '0 Bytes'
+  const k = 1024
+  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+}
+
+export const formatDate = (dateString) => {
+  if (!dateString) return 'Unknown'
+  const date = new Date(dateString)
+  return date.toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  })
+}
+
+export const formatDateTime = (dateString) => {
+  if (!dateString) return 'Unknown'
+  const date = new Date(dateString)
+  return date.toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+export const formatTime = (dateString) => {
+  if (!dateString) return 'Unknown'
+  const date = new Date(dateString)
+  return date.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+export const formatRelativeTime = (dateString) => {
+  if (!dateString) return 'Unknown'
+  const date = new Date(dateString)
+  const now = new Date()
+  const diffInMs = now - date
+  const diffInMinutes = Math.floor(diffInMs / (1000 * 60))
+  const diffInHours = Math.floor(diffInMs / (1000 * 60 * 60))
+  const diffInDays = Math.floor(diffInMs / (1000 * 60 * 60 * 24))
+  
+  if (diffInMinutes < 1) {
+    return 'Just now'
+  } else if (diffInMinutes < 60) {
+    return `${diffInMinutes} minute${diffInMinutes === 1 ? '' : 's'} ago`
+  } else if (diffInHours < 24) {
+    return `${diffInHours} hour${diffInHours === 1 ? '' : 's'} ago`
+  } else if (diffInDays < 7) {
+    return `${diffInDays} day${diffInDays === 1 ? '' : 's'} ago`
+  } else {
+    return formatDate(dateString)
+  }
+}
+
+export const formatTokenCount = (tokens) => {
+  if (tokens < 1000) {
+    return tokens.toString()
+  } else if (tokens < 1000000) {
+    return (tokens / 1000).toFixed(1) + 'K'
+  } else {
+    return (tokens / 1000000).toFixed(1) + 'M'
+  }
+}
+
+export const formatCurrency = (amount, currency = 'USD') => {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(amount)
+}
+
+export const formatPercentage = (value, total) => {
+  if (total === 0) return '0%'
+  const percentage = (value / total) * 100
+  return Math.round(percentage) + '%'
+}
+
+### NEW FILE: src/composables/useAuth.js
+import { computed } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+
+export function useAuth() {
+  const authStore = useAuthStore()
+  
+  const user = computed(() => authStore.user)
+  const isAuthenticated = computed(() => authStore.isAuthenticated)
+  const isLoading = computed(() => authStore.isLoading)
+  
+  const login = async (credentials) => {
+    return await authStore.login(credentials)
+  }
+  
+  const register = async (userData) => {
+    return await authStore.register(userData)
+  }
+  
+  const logout = () => {
+    authStore.logout()
+  }
+  
+  const updateProfile = async (profileData) => {
+    return await authStore.updateProfile(profileData)
+  }
+  
+  return {
+    user,
+    isAuthenticated,
+    isLoading,
+    login,
+    register,
+    logout,
+    updateProfile
+  }
+}
+
+### NEW FILE: src/composables/useClasses.js
+import { computed } from 'vue'
+import { useClassStore } from '@/stores/classes'
+
+export function useClasses() {
+  const classStore = useClassStore()
+  
+  const classes = computed(() => classStore.classes)
+  const currentClass = computed(() => classStore.currentClass)
+  const currentChat = computed(() => classStore.currentChat)
+  const isLoading = computed(() => classStore.isLoading)
+  
+  const fetchClasses = async () => {
+    return await classStore.fetchClasses()
+  }
+  
+  const createClass = async (classData) => {
+    return await classStore.createClass(classData)
+  }
+  
+  const selectClass = (classItem) => {
+    classStore.selectClass(classItem)
+  }
+  
+  const selectChat = (chat) => {
+    classStore.selectChat(chat)
+  }
+  
+  const joinClass = async (classCode) => {
+    return await classStore.joinClass(classCode)
+  }
+  
+  return {
+    classes,
+    currentClass,
+    currentChat,
+    isLoading,
+    fetchClasses,
+    createClass,
+    selectClass,
+    selectChat,
+    joinClass
+  }
+}
+
+### NEW FILE: src/composables/useUI.js
+import { computed } from 'vue'
+import { useUIStore } from '@/stores/ui'
+
+export function useUI() {
+  const uiStore = useUIStore()
+  
+  const activeModal = computed(() => uiStore.activeModal)
+  const activeSlideOut = computed(() => uiStore.activeSlideOut)
+  const sidebarExpanded = computed(() => uiStore.sidebarExpanded)
+  
+  const openModal = (modalName, props = {}) => {
+    uiStore.openModal(modalName, props)
+  }
+  
+  const closeModal = () => {
+    uiStore.closeModal()
+  }
+  
+  const openSlideOut = (slideOutName, props = {}) => {
+    uiStore.openSlideOut(slideOutName, props)
+  }
+  
+  const closeSlideOut = () => {
+    uiStore.closeSlideOut()
+  }
+  
+  const toggleSidebar = () => {
+    uiStore.toggleSidebar()
+  }
+  
+  return {
+    activeModal,
+    activeSlideOut,
+    sidebarExpanded,
+    openModal,
+    closeModal,
+    openSlideOut,
+    closeSlideOut,
+    toggleSidebar
+  }
+}
+
+### NEW FILE: src/composables/useFileUpload.js
+import { ref } from 'vue'
+import { validateFileUpload } from '@/utils/validators'
+import { documentService } from '@/services/content/documentService'
+
+export function useFileUpload() {
+  const isUploading = ref(false)
+  const uploadProgress = ref(0)
+  const uploadError = ref(null)
+  
+  const uploadClassDocument = async (classId, file) => {
+    const validation = validateFileUpload(file)
+    if (!validation.isValid) {
+      uploadError.value = validation.error
+      return { success: false, error: validation.error }
+    }
+    
+    isUploading.value = true
+    uploadError.value = null
+    uploadProgress.value = 0
+    
+    try {
+      const response = await documentService.uploadClassDocument(classId, file)
+      uploadProgress.value = 100
+      
+      return { success: true, data: response.data }
+    } catch (error) {
+      uploadError.value = error.response?.data?.message || 'Upload failed'
+      return { success: false, error: uploadError.value }
+    } finally {
+      isUploading.value = false
+    }
+  }
+  
+  const uploadChatDocument = async (sessionId, file) => {
+    const validation = validateFileUpload(file)
+    if (!validation.isValid) {
+      uploadError.value = validation.error
+      return { success: false, error: validation.error }
+    }
+    
+    isUploading.value = true
+    uploadError.value = null
+    uploadProgress.value = 0
+    
+    try {
+      const response = await documentService.uploadChatDocument(sessionId, file)
+      uploadProgress.value = 100
+      
+      return { success: true, data: response.data }
+    } catch (error) {
+      uploadError.value = error.response?.data?.message || 'Upload failed'
+      return { success: false, error: uploadError.value }
+    } finally {
+      isUploading.value = false
+    }
+  }
+  
+  const uploadMultipleFiles = async (files, uploadFn) => {
+    const results = []
+    
+    for (const file of files) {
+      const result = await uploadFn(file)
+      results.push({ file: file.name, ...result })
+    }
+    
+    return results
+  }
+  
+  return {
+    isUploading,
+    uploadProgress,
+    uploadError,
+    uploadClassDocument,
+    uploadChatDocument,
+    uploadMultipleFiles
+  }
+}
+
+### NEW FILE: src/components/shared/BaseButton.vue
+<template>
+  <button
+    :type="type"
+    :disabled="disabled || loading"
+    :class="buttonClasses"
+    @click="$emit('click', $event)"
+  >
+    <svg
+      v-if="loading"
+      class="animate-spin -ml-1 mr-2 h-4 w-4"
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+    >
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+    </svg>
+    
+    <slot />
+  </button>
+</template>
+
+<script setup>
+import { computed } from 'vue'
+
+const props = defineProps({
+  variant: {
+    type: String,
+    default: 'primary',
+    validator: (value) => ['primary', 'secondary', 'danger', 'ghost'].includes(value)
+  },
+  size: {
+    type: String,
+    default: 'md',
+    validator: (value) => ['sm', 'md', 'lg'].includes(value)
+  },
+  type: {
+    type: String,
+    default: 'button'
+  },
+  disabled: {
+    type: Boolean,
+    default: false
+  },
+  loading: {
+    type: Boolean,
+    default: false
+  },
+  fullWidth: {
+    type: Boolean,
+    default: false
+  }
+})
+
+defineEmits(['click'])
+
+const buttonClasses = computed(() => {
+  const base = 'inline-flex items-center justify-center font-medium rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2'
+  
+  const variants = {
+    primary: 'bg-primary-600 hover:bg-primary-700 text-white focus:ring-primary-500',
+    secondary: 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 focus:ring-primary-500',
+    danger: 'bg-red-600 hover:bg-red-700 text-white focus:ring-red-500',
+    ghost: 'bg-transparent hover:bg-gray-100 text-gray-700 focus:ring-primary-500'
+  }
+  
+  const sizes = {
+    sm: 'px-3 py-1.5 text-sm',
+    md: 'px-4 py-2 text-sm',
+    lg: 'px-6 py-3 text-base'
+  }
+  
+  const disabled = props.disabled || props.loading ? 'opacity-50 cursor-not-allowed' : ''
+  const width = props.fullWidth ? 'w-full' : ''
+  
+  return [base, variants[props.variant], sizes[props.size], disabled, width].filter(Boolean).join(' ')
+})
+</script>
+
+### NEW FILE: src/components/shared/BaseInput.vue
+<template>
+  <div class="space-y-1">
+    <label v-if="label" :for="id" class="block text-sm font-medium text-gray-700">
+      {{ label }}
+      <span v-if="required" class="text-red-500">*</span>
+    </label>
+    
+    <div class="relative">
+      <input
+        :id="id"
+        :type="type"
+        :value="modelValue"
+        :placeholder="placeholder"
+        :required="required"
+        :disabled="disabled"
+        :class="inputClasses"
+        @input="$emit('update:modelValue', $event.target.value)"
+        @blur="$emit('blur', $event)"
+        @focus="$emit('focus', $event)"
+      />
+      
+      <div v-if="$slots.append" class="absolute inset-y-0 right-0 flex items-center pr-3">
+        <slot name="append" />
+      </div>
+    </div>
+    
+    <p v-if="error" class="text-red-600 text-sm">{{ error }}</p>
+    <p v-else-if="hint" class="text-gray-500 text-sm">{{ hint }}</p>
+  </div>
+</template>
+
+<script setup>
+import { computed } from 'vue'
+
+const props = defineProps({
+  id: {
+    type: String,
+    required: true
+  },
+  modelValue: {
+    type: [String, Number],
+    default: ''
+  },
+  type: {
+    type: String,
+    default: 'text'
+  },
+  label: {
+    type: String,
+    default: ''
+  },
+  placeholder: {
+    type: String,
+    default: ''
+  },
+  required: {
+    type: Boolean,
+    default: false
+  },
+  disabled: {
+    type: Boolean,
+    default: false
+  },
+  error: {
+    type: String,
+    default: ''
+  },
+  hint: {
+    type: String,
+    default: ''
+  }
+})
+
+defineEmits(['update:modelValue', 'blur', 'focus'])
+
+const inputClasses = computed(() => {
+  const base = 'w-full px-3 py-2 border rounded-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-0'
+  
+  const state = props.error
+    ? 'border-red-300 focus:border-red-500 focus:ring-red-500'
+    : 'border-gray-300 focus:border-primary-500 focus:ring-primary-500'
+  
+  const disabled = props.disabled ? 'bg-gray-50 text-gray-500 cursor-not-allowed' : 'bg-white'
+  
+  return [base, state, disabled].join(' ')
+})
+</script>
+
+### NEW FILE: src/components/shared/LoadingSpinner.vue
+<template>
+  <div :class="containerClasses">
+    <svg
+      :class="spinnerClasses"
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+    >
+      <circle
+        class="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        stroke-width="4"
+      ></circle>
+      <path
+        class="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+      ></path>
+    </svg>
+    
+    <p v-if="text" :class="textClasses">{{ text }}</p>
+  </div>
+</template>
+
+<script setup>
+import { computed } from 'vue'
+
+const props = defineProps({
+  size: {
+    type: String,
+    default: 'md',
+    validator: (value) => ['sm', 'md', 'lg', 'xl'].includes(value)
+  },
+  text: {
+    type: String,
+    default: ''
+  },
+  center: {
+    type: Boolean,
+    default: true
+  },
+  color: {
+    type: String,
+    default: 'primary',
+    validator: (value) => ['primary', 'white', 'gray'].includes(value)
+  }
+})
+
+const containerClasses = computed(() => {
+  const base = 'flex flex-col items-center space-y-2'
+  const center = props.center ? 'justify-center' : ''
+  
+  return [base, center].filter(Boolean).join(' ')
+})
+
+const spinnerClasses = computed(() => {
+  const sizes = {
+    sm: 'w-4 h-4',
+    md: 'w-6 h-6',
+    lg: 'w-8 h-8',
+    xl: 'w-12 h-12'
+  }
+  
+  const colors = {
+    primary: 'text-primary-600',
+    white: 'text-white',
+    gray: 'text-gray-400'
+  }
+  
+  return ['animate-spin', sizes[props.size], colors[props.color]].join(' ')
+})
+
+const textClasses = computed(() => {
+  const colors = {
+    primary: 'text-primary-600',
+    white: 'text-white',
+    gray: 'text-gray-500'
+  }
+  
+  return ['text-sm font-medium', colors[props.color]].join(' ')
+})
+</script>

@@ -2,3 +2,6 @@
 temp
 magik*
 .env
+.DStore
+
+node_modules

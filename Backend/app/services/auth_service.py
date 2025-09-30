@@ -39,25 +39,24 @@ class AuthService:
     
     async def authenticate_user(self, db: Session, username: str, password: str) -> Token:
         """Authenticate user and return JWT token"""
-        user = db.query(User).filter(User.username == username).first()
+        # Check if username is an email or actual username
+        user = db.query(User).filter(
+            (User.username == username) | (User.email == username)
+        ).first()
         
         if not user:
-            raise ValueError("Invalid credentials")
-        
+            raise ValueError(f"Username or emmail {username} does not exist")
         if not user.is_active:
             raise ValueError("Account is deactivated")
-        
         if not verify_password(password, user.hashed_password):
-            raise ValueError("Invalid credentials")
+            raise ValueError("Incorrect password")
         
         # Create JWT token
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
             data={"sub": user.username}, expires_delta=access_token_expires
         )
-        
         user_response = UserResponse.model_validate(user)
-        
         return Token(
             access_token=access_token,
             token_type="bearer",

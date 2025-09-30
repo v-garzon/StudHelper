@@ -1,0 +1,1782 @@
+### NEW FILE: package.json
+{
+  "name": "studhelper-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:ui": "vitest --ui"
+  },
+  "dependencies": {
+    "vue": "^3.4.0",
+    "vue-router": "^4.2.0",
+    "pinia": "^2.1.0",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.5.0",
+    "vite": "^5.0.0",
+    "vitest": "^1.0.0",
+    "tailwindcss": "^3.3.0",
+    "autoprefixer": "^10.4.0",
+    "postcss": "^8.4.0"
+  }
+}
+
+### NEW FILE: vite.config.js
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import { resolve } from 'path'
+
+export default defineConfig({
+  plugins: [vue()],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, 'src')
+    }
+  }
+})
+
+### NEW FILE: tailwind.config.js
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{vue,js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        primary: {
+          50: '#eff6ff',
+          500: '#3b82f6',
+          600: '#2563eb',
+          700: '#1d4ed8',
+        },
+        gray: {
+          50: '#f9fafb',
+          100: '#f3f4f6',
+          200: '#e5e7eb',
+          300: '#d1d5db',
+          400: '#9ca3af',
+          500: '#6b7280',
+          600: '#4b5563',
+          700: '#374151',
+          800: '#1f2937',
+          900: '#111827',
+        }
+      },
+      fontFamily: {
+        sans: ['Inter', 'system-ui', 'sans-serif'],
+      },
+    },
+  },
+  plugins: [],
+}
+
+### NEW FILE: postcss.config.js
+export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}
+
+### NEW FILE: index.html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StudHelper - AI Study Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
+
+### NEW FILE: src/main.js
+import { createApp } from 'vue'
+import { createPinia } from 'pinia'
+import router from './router'
+import App from './App.vue'
+import './assets/css/main.css'
+
+const app = createApp(App)
+const pinia = createPinia()
+
+app.use(pinia)
+app.use(router)
+
+app.mount('#app')
+
+### NEW FILE: src/App.vue
+<template>
+  <div id="app" class="min-h-screen bg-gray-50">
+    <router-view />
+    
+    <!-- Global modal container -->
+    <div id="modal-container"></div>
+    
+    <!-- Global slide-out container -->
+    <div id="slideout-container"></div>
+    
+    <!-- Global overlay container -->
+    <div id="overlay-container"></div>
+  </div>
+</template>
+
+<script setup>
+import { onMounted } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+
+const authStore = useAuthStore()
+
+onMounted(() => {
+  // Try to restore user session on app load
+  authStore.initializeAuth()
+})
+</script>
+
+### NEW FILE: src/assets/css/main.css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary-600 hover:bg-primary-700 text-white font-medium py-2 px-4 rounded-lg transition-colors duration-200;
+  }
+  
+  .btn-secondary {
+    @apply bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded-lg border border-gray-300 transition-colors duration-200;
+  }
+  
+  .input-field {
+    @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-colors duration-200;
+  }
+}
+
+@layer utilities {
+  .modal-overlay {
+    @apply fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4;
+  }
+  
+  .modal-content {
+    @apply bg-white rounded-xl shadow-2xl w-full max-w-[70%] max-h-[90%] overflow-hidden;
+  }
+  
+  .slideout-overlay {
+    @apply fixed inset-0 z-40;
+  }
+  
+  .slideout-content {
+    @apply fixed top-0 right-0 h-full w-[35%] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out;
+  }
+}
+
+### NEW FILE: src/router/index.js
+import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+
+const routes = [
+  {
+    path: '/',
+    name: 'Landing',
+    component: () => import('@/views/LandingView.vue'),
+    meta: { requiresGuest: true }
+  },
+  {
+    path: '/dashboard',
+    name: 'Dashboard',
+    component: () => import('@/views/DashboardView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/help',
+    name: 'Help',
+    component: () => import('@/views/HelpView.vue')
+  },
+  {
+    path: '/:pathMatch(.*)*',
+    name: 'NotFound',
+    component: () => import('@/views/NotFoundView.vue')
+  }
+]
+
+const router = createRouter({
+  history: createWebHistory(),
+  routes
+})
+
+// Navigation guards
+router.beforeEach((to, from, next) => {
+  const authStore = useAuthStore()
+  
+  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
+    next({ name: 'Landing' })
+  } else if (to.meta.requiresGuest && authStore.isAuthenticated) {
+    next({ name: 'Dashboard' })
+  } else {
+    next()
+  }
+})
+
+export default router
+
+### NEW FILE: src/stores/index.js
+import { createPinia } from 'pinia'
+
+export const pinia = createPinia()
+
+### NEW FILE: src/stores/auth.js
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+import { authService } from '@/services/auth/authService'
+
+export const useAuthStore = defineStore('auth', () => {
+  const user = ref(null)
+  const token = ref(localStorage.getItem('token') || null)
+  const isLoading = ref(false)
+
+  const isAuthenticated = computed(() => !!token.value && !!user.value)
+
+  const login = async (credentials) => {
+    isLoading.value = true
+    try {
+      const response = await authService.login(credentials)
+      token.value = response.data.access_token
+      user.value = response.data.user
+      localStorage.setItem('token', token.value)
+      return { success: true }
+    } catch (error) {
+      return { success: false, message: error.response?.data?.message || 'Login failed' }
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  const register = async (userData) => {
+    isLoading.value = true
+    try {
+      const response = await authService.register(userData)
+      token.value = response.data.access_token
+      user.value = response.data.user
+      localStorage.setItem('token', token.value)
+      return { success: true }
+    } catch (error) {
+      return { success: false, message: error.response?.data?.message || 'Registration failed' }
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  const logout = () => {
+    user.value = null
+    token.value = null
+    localStorage.removeItem('token')
+  }
+
+  const initializeAuth = async () => {
+    if (token.value) {
+      try {
+        const response = await authService.getCurrentUser()
+        user.value = response.data
+      } catch (error) {
+        logout()
+      }
+    }
+  }
+
+  return {
+    user,
+    token,
+    isLoading,
+    isAuthenticated,
+    login,
+    register,
+    logout,
+    initializeAuth
+  }
+})
+
+### NEW FILE: src/stores/ui.js
+import { defineStore } from 'pinia'
+import { ref } from 'vue'
+
+export const useUIStore = defineStore('ui', () => {
+  const activeModal = ref(null)
+  const activeSlideOut = ref(null)
+  const sidebarExpanded = ref(true)
+
+  const openModal = (modalName, props = {}) => {
+    activeModal.value = { name: modalName, props }
+  }
+
+  const closeModal = () => {
+    activeModal.value = null
+  }
+
+  const openSlideOut = (slideOutName, props = {}) => {
+    activeSlideOut.value = { name: slideOutName, props }
+  }
+
+  const closeSlideOut = () => {
+    activeSlideOut.value = null
+  }
+
+  const toggleSidebar = () => {
+    sidebarExpanded.value = !sidebarExpanded.value
+  }
+
+  return {
+    activeModal,
+    activeSlideOut,
+    sidebarExpanded,
+    openModal,
+    closeModal,
+    openSlideOut,
+    closeSlideOut,
+    toggleSidebar
+  }
+})
+
+### NEW FILE: src/stores/classes.js
+import { defineStore } from 'pinia'
+import { ref } from 'vue'
+import { classService } from '@/services/classes/classService'
+
+export const useClassStore = defineStore('classes', () => {
+  const classes = ref([])
+  const currentClass = ref(null)
+  const currentChat = ref(null)
+  const isLoading = ref(false)
+
+  const fetchClasses = async () => {
+    isLoading.value = true
+    try {
+      const response = await classService.getClasses()
+      classes.value = response.data
+    } catch (error) {
+      console.error('Failed to fetch classes:', error)
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  const selectClass = (classItem) => {
+    currentClass.value = classItem
+    currentChat.value = null
+  }
+
+  const selectChat = (chat) => {
+    currentChat.value = chat
+  }
+
+  const createClass = async (classData) => {
+    try {
+      const response = await classService.createClass(classData)
+      classes.value.push(response.data)
+      return { success: true, data: response.data }
+    } catch (error) {
+      return { success: false, message: error.response?.data?.message || 'Failed to create class' }
+    }
+  }
+
+  return {
+    classes,
+    currentClass,
+    currentChat,
+    isLoading,
+    fetchClasses,
+    selectClass,
+    selectChat,
+    createClass
+  }
+})
+
+### NEW FILE: src/views/LandingView.vue
+<template>
+  <div class="min-h-screen bg-gradient-to-br from-primary-50 to-white">
+    <!-- Navigation -->
+    <nav class="relative z-10 p-6">
+      <div class="flex justify-between items-center max-w-7xl mx-auto">
+        <h1 class="text-2xl font-bold text-gray-900">StudHelper</h1>
+        <router-link to="/help" class="text-gray-600 hover:text-gray-900 font-medium">
+          Help
+        </router-link>
+      </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <div class="flex items-center justify-center min-h-[calc(100vh-100px)]">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-12 max-w-6xl mx-auto px-6">
+        
+        <!-- Auth Section -->
+        <div class="flex flex-col justify-center">
+          <div v-if="!showForm" class="space-y-6">
+            <div class="text-center lg:text-left">
+              <h2 class="text-4xl font-bold text-gray-900 mb-4">
+                Welcome to StudHelper
+              </h2>
+              <p class="text-xl text-gray-600">
+                Your personal AI study assistant
+              </p>
+            </div>
+            
+            <div class="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
+              <button 
+                @click="showLoginForm"
+                class="btn-primary px-8 py-3 text-lg"
+              >
+                Login
+              </button>
+              <button 
+                @click="showRegisterForm"
+                class="btn-secondary px-8 py-3 text-lg"
+              >
+                Register
+              </button>
+            </div>
+          </div>
+
+          <!-- Auth Forms -->
+          <div v-else class="w-full max-w-md mx-auto lg:mx-0">
+            <LoginForm 
+              v-if="formType === 'login'" 
+              @success="handleAuthSuccess"
+              @switch-to-register="showRegisterForm"
+              @cancel="hideForm"
+            />
+            <RegisterForm 
+              v-if="formType === 'register'" 
+              @success="handleAuthSuccess"
+              @switch-to-login="showLoginForm"
+              @cancel="hideForm"
+            />
+          </div>
+        </div>
+
+        <!-- Branding Section -->
+        <div class="flex flex-col justify-center text-center lg:text-left">
+          <div class="bg-white p-8 rounded-2xl shadow-lg">
+            <h3 class="text-2xl font-bold text-gray-900 mb-4">
+              AI-Powered Learning
+            </h3>
+            <p class="text-gray-600 mb-6">
+              Upload your study materials and chat with an AI tutor that understands your specific content.
+            </p>
+            <div class="space-y-3 text-left">
+              <div class="flex items-center space-x-3">
+                <div class="w-2 h-2 bg-primary-500 rounded-full"></div>
+                <span class="text-gray-700">Upload PDFs, documents, and videos</span>
+              </div>
+              <div class="flex items-center space-x-3">
+                <div class="w-2 h-2 bg-primary-500 rounded-full"></div>
+                <span class="text-gray-700">Create organized study classes</span>
+              </div>
+              <div class="flex items-center space-x-3">
+                <div class="w-2 h-2 bg-primary-500 rounded-full"></div>
+                <span class="text-gray-700">Chat with AI about your materials</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scroll indicator -->
+    <div class="fixed bottom-8 left-1/2 transform -translate-x-1/2 text-gray-400">
+      <div class="animate-bounce">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
+        </svg>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
+import LoginForm from '@/components/features/landing/LoginForm.vue'
+import RegisterForm from '@/components/features/landing/RegisterForm.vue'
+
+const router = useRouter()
+const showForm = ref(false)
+const formType = ref('login')
+
+const showLoginForm = () => {
+  formType.value = 'login'
+  showForm.value = true
+}
+
+const showRegisterForm = () => {
+  formType.value = 'register'
+  showForm.value = true
+}
+
+const hideForm = () => {
+  showForm.value = false
+}
+
+const handleAuthSuccess = () => {
+  router.push({ name: 'Dashboard' })
+}
+</script>
+
+### NEW FILE: src/views/DashboardView.vue
+<template>
+  <div class="h-screen flex bg-gray-50">
+    <!-- Sidebar -->
+    <div :class="[
+      'bg-white border-r border-gray-200 transition-all duration-300',
+      sidebarExpanded ? 'w-80' : 'w-16'
+    ]">
+      <Sidebar />
+    </div>
+
+    <!-- Main Content -->
+    <div class="flex-1 flex flex-col">
+      <!-- Header -->
+      <header class="bg-white border-b border-gray-200 px-6 py-4">
+        <div class="flex justify-between items-center">
+          <div class="flex items-center space-x-4">
+            <button 
+              @click="toggleSidebar"
+              class="p-2 rounded-lg hover:bg-gray-100"
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+              </svg>
+            </button>
+            <h1 class="text-xl font-semibold text-gray-900">
+              {{ currentClass ? currentClass.name : 'StudHelper Dashboard' }}
+            </h1>
+          </div>
+          
+          <UserMenu />
+        </div>
+      </header>
+
+      <!-- Content Area -->
+      <main class="flex-1 overflow-hidden">
+        <ChatInterface v-if="currentChat" />
+        <WelcomeScreen v-else />
+      </main>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useUIStore } from '@/stores/ui'
+import { useClassStore } from '@/stores/classes'
+import Sidebar from '@/components/features/dashboard/Sidebar.vue'
+import UserMenu from '@/components/features/dashboard/UserMenu.vue'
+import ChatInterface from '@/components/features/dashboard/ChatInterface.vue'
+import WelcomeScreen from '@/components/features/dashboard/WelcomeScreen.vue'
+
+const uiStore = useUIStore()
+const classStore = useClassStore()
+
+const { sidebarExpanded } = storeToRefs(uiStore)
+const { currentClass, currentChat } = storeToRefs(classStore)
+
+const toggleSidebar = () => {
+  uiStore.toggleSidebar()
+}
+</script>
+
+### NEW FILE: src/views/HelpView.vue
+<template>
+  <div class="min-h-screen bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between items-center py-4">
+          <router-link to="/" class="text-2xl font-bold text-primary-600">
+            StudHelper
+          </router-link>
+          <router-link 
+            to="/dashboard" 
+            class="btn-primary"
+          >
+            Back to Dashboard
+          </router-link>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Content -->
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div class="bg-white rounded-lg shadow-sm p-8">
+        <h1 class="text-3xl font-bold text-gray-900 mb-8">Help & Documentation</h1>
+
+        <!-- Getting Started -->
+        <section class="mb-12">
+          <h2 class="text-2xl font-semibold text-gray-900 mb-4">Getting Started</h2>
+          <div class="space-y-4 text-gray-700">
+            <p>Welcome to StudHelper! This guide will help you get started with your AI study assistant.</p>
+            
+            <div class="bg-gray-50 p-6 rounded-lg">
+              <h3 class="font-semibold text-gray-900 mb-3">Quick Start Steps:</h3>
+              <ol class="list-decimal list-inside space-y-2">
+                <li>Create your first study class</li>
+                <li>Upload your study materials (PDFs, documents, videos)</li>
+                <li>Start chatting with your AI tutor about the content</li>
+                <li>Organize your learning into focused sessions</li>
+              </ol>
+            </div>
+          </div>
+        </section>
+
+        <!-- Features -->
+        <section class="mb-12">
+          <h2 class="text-2xl font-semibold text-gray-900 mb-4">Features</h2>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            
+            <div class="bg-gray-50 p-6 rounded-lg">
+              <h3 class="font-semibold text-gray-900 mb-3">Class Management</h3>
+              <p class="text-gray-700">
+                Create and organize study classes for different subjects or topics. Each class can contain multiple documents and chat sessions.
+              </p>
+            </div>
+
+            <div class="bg-gray-50 p-6 rounded-lg">
+              <h3 class="font-semibold text-gray-900 mb-3">Document Upload</h3>
+              <p class="text-gray-700">
+                Upload PDFs, Word documents, PowerPoint presentations, and YouTube videos. The AI will analyze and understand your content.
+              </p>
+            </div>
+
+            <div class="bg-gray-50 p-6 rounded-lg">
+              <h3 class="font-semibold text-gray-900 mb-3">AI Chat</h3>
+              <p class="text-gray-700">
+                Chat with an AI tutor that has knowledge of your specific study materials. Ask questions, request explanations, and get help.
+              </p>
+            </div>
+
+            <div class="bg-gray-50 p-6 rounded-lg">
+              <h3 class="font-semibold text-gray-900 mb-3">Usage Tracking</h3>
+              <p class="text-gray-700">
+                Monitor your AI usage and stay within your limits. Track tokens used per class and optimize your study sessions.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <!-- FAQ -->
+        <section class="mb-12">
+          <h2 class="text-2xl font-semibold text-gray-900 mb-4">Frequently Asked Questions</h2>
+          <div class="space-y-6">
+            
+            <div class="border-l-4 border-primary-500 pl-4">
+              <h3 class="font-semibold text-gray-900 mb-2">What file types can I upload?</h3>
+              <p class="text-gray-700">
+                You can upload PDF files, Word documents (.docx), PowerPoint presentations (.pptx), text files, and YouTube video links.
+              </p>
+            </div>
+
+            <div class="border-l-4 border-primary-500 pl-4">
+              <h3 class="font-semibold text-gray-900 mb-2">How does the AI understand my documents?</h3>
+              <p class="text-gray-700">
+                The AI processes your documents by extracting text, creating embeddings, and building a knowledge base specific to your content.
+              </p>
+            </div>
+
+            <div class="border-l-4 border-primary-500 pl-4">
+              <h3 class="font-semibold text-gray-900 mb-2">Can I share classes with others?</h3>
+              <p class="text-gray-700">
+                Yes! You can invite others to join your classes with different permission levels, from read-only access to full management rights.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Contact -->
+        <section>
+          <h2 class="text-2xl font-semibold text-gray-900 mb-4">Need More Help?</h2>
+          <div class="bg-primary-50 p-6 rounded-lg">
+            <p class="text-gray-700 mb-4">
+              Can't find what you're looking for? We're here to help!
+            </p>
+            <div class="flex flex-col sm:flex-row gap-4">
+              <a href="mailto:support@studhelper.com" class="btn-primary inline-block text-center">
+                Email Support
+              </a>
+              <a href="#" class="btn-secondary inline-block text-center">
+                Community Forum
+              </a>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+// No specific logic needed for static help page
+</script>
+
+### NEW FILE: src/views/NotFoundView.vue
+<template>
+  <div class="min-h-screen flex items-center justify-center bg-gray-50">
+    <div class="text-center">
+      <h1 class="text-6xl font-bold text-gray-900">404</h1>
+      <p class="text-xl text-gray-600 mt-4 mb-8">Page not found</p>
+      <router-link to="/" class="btn-primary">
+        Go Home
+      </router-link>
+    </div>
+  </div>
+</template>
+
+### NEW FILE: src/components/features/landing/LoginForm.vue
+<template>
+  <div class="bg-white p-8 rounded-2xl shadow-lg">
+    <h2 class="text-2xl font-bold text-gray-900 mb-6">Login to StudHelper</h2>
+    
+    <form @submit.prevent="handleSubmit" class="space-y-4">
+      <div>
+        <label for="email" class="block text-sm font-medium text-gray-700 mb-1">
+          Email
+        </label>
+        <input
+          id="email"
+          v-model="form.email"
+          type="email"
+          required
+          class="input-field"
+          placeholder="Enter your email"
+        />
+      </div>
+
+      <div>
+        <label for="password" class="block text-sm font-medium text-gray-700 mb-1">
+          Password
+        </label>
+        <input
+          id="password"
+          v-model="form.password"
+          type="password"
+          required
+          class="input-field"
+          placeholder="Enter your password"
+        />
+      </div>
+
+      <div v-if="error" class="text-red-600 text-sm">
+        {{ error }}
+      </div>
+
+      <button 
+        type="submit" 
+        :disabled="isLoading"
+        class="w-full btn-primary"
+      >
+        <span v-if="isLoading">Logging in...</span>
+        <span v-else>Login</span>
+      </button>
+    </form>
+
+    <div class="mt-6 text-center space-y-2">
+      <button 
+        @click="$emit('switch-to-register')"
+        class="text-primary-600 hover:text-primary-700 font-medium"
+      >
+        Don't have an account? Register
+      </button>
+      <br>
+      <button 
+        @click="$emit('cancel')"
+        class="text-gray-600 hover:text-gray-700"
+      >
+        Back
+      </button>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+
+const emit = defineEmits(['success', 'switch-to-register', 'cancel'])
+
+const authStore = useAuthStore()
+const form = ref({
+  email: '',
+  password: ''
+})
+const error = ref('')
+
+const isLoading = ref(false)
+
+const handleSubmit = async () => {
+  isLoading.value = true
+  error.value = ''
+
+  const result = await authStore.login(form.value)
+  
+  if (result.success) {
+    emit('success')
+  } else {
+    error.value = result.message
+  }
+  
+  isLoading.value = false
+}
+</script>
+
+### NEW FILE: src/components/features/landing/RegisterForm.vue
+<template>
+  <div class="bg-white p-8 rounded-2xl shadow-lg">
+    <h2 class="text-2xl font-bold text-gray-900 mb-6">Create Account</h2>
+    
+    <form @submit.prevent="handleSubmit" class="space-y-4">
+      <div>
+        <label for="full_name" class="block text-sm font-medium text-gray-700 mb-1">
+          Full Name
+        </label>
+        <input
+          id="full_name"
+          v-model="form.full_name"
+          type="text"
+          required
+          class="input-field"
+          placeholder="Enter your full name"
+        />
+      </div>
+
+      <div>
+        <label for="email" class="block text-sm font-medium text-gray-700 mb-1">
+          Email
+        </label>
+        <input
+          id="email"
+          v-model="form.email"
+          type="email"
+          required
+          class="input-field"
+          placeholder="Enter your email"
+        />
+      </div>
+
+      <div>
+        <label for="username" class="block text-sm font-medium text-gray-700 mb-1">
+          Username
+        </label>
+        <input
+          id="username"
+          v-model="form.username"
+          type="text"
+          required
+          class="input-field"
+          placeholder="Choose a username"
+        />
+      </div>
+
+      <div>
+        <label for="password" class="block text-sm font-medium text-gray-700 mb-1">
+          Password
+        </label>
+        <input
+          id="password"
+          v-model="form.password"
+          type="password"
+          required
+          class="input-field"
+          placeholder="Create a password"
+        />
+      </div>
+
+      <div v-if="error" class="text-red-600 text-sm">
+        {{ error }}
+      </div>
+
+      <button 
+        type="submit" 
+        :disabled="isLoading"
+        class="w-full btn-primary"
+      >
+        <span v-if="isLoading">Creating account...</span>
+        <span v-else>Register</span>
+      </button>
+    </form>
+
+    <div class="mt-6 text-center space-y-2">
+      <button 
+        @click="$emit('switch-to-login')"
+        class="text-primary-600 hover:text-primary-700 font-medium"
+      >
+        Already have an account? Login
+      </button>
+      <br>
+      <button 
+        @click="$emit('cancel')"
+        class="text-gray-600 hover:text-gray-700"
+      >
+        Back
+      </button>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+
+const emit = defineEmits(['success', 'switch-to-login', 'cancel'])
+
+const authStore = useAuthStore()
+const form = ref({
+  full_name: '',
+  email: '',
+  username: '',
+  password: ''
+})
+const error = ref('')
+const isLoading = ref(false)
+
+const handleSubmit = async () => {
+  isLoading.value = true
+  error.value = ''
+
+  const result = await authStore.register(form.value)
+  
+  if (result.success) {
+    emit('success')
+  } else {
+    error.value = result.message
+  }
+  
+  isLoading.value = false
+}
+</script>
+
+### NEW FILE: src/components/features/dashboard/Sidebar.vue
+<template>
+  <div class="h-full flex flex-col">
+    <!-- Header -->
+    <div class="p-4 border-b border-gray-200">
+      <div v-if="sidebarExpanded" class="flex items-center justify-between">
+        <h2 class="font-semibold text-gray-900">Classes</h2>
+        <button 
+          @click="openCreateClassModal"
+          class="p-1 rounded-md hover:bg-gray-100"
+          title="Create New Class"
+        >
+          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+          </svg>
+        </button>
+      </div>
+      <div v-else class="flex justify-center">
+        <button 
+          @click="openCreateClassModal"
+          class="p-1 rounded-md hover:bg-gray-100"
+          title="Create New Class"
+        >
+          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Classes List -->
+    <div class="flex-1 overflow-y-auto">
+      <div v-if="isLoading" class="p-4">
+        <div class="animate-pulse space-y-2">
+          <div class="h-4 bg-gray-200 rounded"></div>
+          <div class="h-4 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      </div>
+
+      <div v-else-if="classes.length === 0" class="p-4 text-center text-gray-500">
+        <div v-if="sidebarExpanded">
+          <p class="mb-2">No classes yet</p>
+          <button @click="openCreateClassModal" class="text-primary-600 hover:text-primary-700">
+            Create your first class
+          </button>
+        </div>
+      </div>
+
+      <div v-else class="p-2 space-y-1">
+        <div 
+          v-for="classItem in classes" 
+          :key="classItem.id"
+          class="group"
+        >
+          <!-- Class Item -->
+          <div 
+            :class="[
+              'flex items-center p-2 rounded-lg cursor-pointer transition-colors',
+              currentClass?.id === classItem.id ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50'
+            ]"
+            @click="selectClass(classItem)"
+          >
+            <button
+              @click.stop="toggleClassExpansion(classItem.id)"
+              class="mr-2 p-1"
+            >
+              <svg 
+                :class="[
+                  'w-4 h-4 transition-transform',
+                  expandedClasses.includes(classItem.id) ? 'rotate-90' : ''
+                ]"
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+              </svg>
+            </button>
+            
+            <div v-if="sidebarExpanded" class="flex-1 min-w-0">
+              <p class="text-sm font-medium truncate">{{ classItem.name }}</p>
+              <p class="text-xs text-gray-500">{{ classItem.chats?.length || 0 }} chats</p>
+            </div>
+            
+            <div v-if="sidebarExpanded" class="flex space-x-1 opacity-0 group-hover:opacity-100">
+              <button
+                @click.stop="createNewChat(classItem)"
+                class="p-1 rounded hover:bg-gray-200"
+                title="New Chat"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                </svg>
+              </button>
+              <button
+                @click.stop="openClassInfo(classItem)"
+                class="p-1 rounded hover:bg-gray-200"
+                title="Class Info"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Chats List -->
+          <div 
+            v-if="expandedClasses.includes(classItem.id) && sidebarExpanded"
+            class="ml-6 space-y-1"
+          >
+            <div
+              v-for="chat in classItem.chats || []"
+              :key="chat.id"
+              :class="[
+                'flex items-center p-2 rounded-lg cursor-pointer text-sm transition-colors',
+                currentChat?.id === chat.id ? 'bg-primary-100 text-primary-800' : 'hover:bg-gray-50'
+              ]"
+              @click="selectChat(chat)"
+            >
+              <svg class="w-4 h-4 mr-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+              </svg>
+              <span class="truncate">{{ chat.title || 'New Chat' }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useUIStore } from '@/stores/ui'
+import { useClassStore } from '@/stores/classes'
+
+const uiStore = useUIStore()
+const classStore = useClassStore()
+
+const { sidebarExpanded } = storeToRefs(uiStore)
+const { classes, currentClass, currentChat, isLoading } = storeToRefs(classStore)
+
+const expandedClasses = ref([])
+
+const toggleClassExpansion = (classId) => {
+  const index = expandedClasses.value.indexOf(classId)
+  if (index > -1) {
+    expandedClasses.value.splice(index, 1)
+  } else {
+    expandedClasses.value.push(classId)
+  }
+}
+
+const selectClass = (classItem) => {
+  classStore.selectClass(classItem)
+  if (!expandedClasses.value.includes(classItem.id)) {
+    expandedClasses.value.push(classItem.id)
+  }
+}
+
+const selectChat = (chat) => {
+  classStore.selectChat(chat)
+}
+
+const openCreateClassModal = () => {
+  uiStore.openModal('CreateClassModal')
+}
+
+const createNewChat = (classItem) => {
+  // This would typically create a new chat and select it
+  console.log('Creating new chat for class:', classItem.name)
+}
+
+const openClassInfo = (classItem) => {
+  uiStore.openSlideOut('ClassInfoPanel', { classItem })
+}
+
+onMounted(() => {
+  classStore.fetchClasses()
+})
+</script>
+
+### NEW FILE: src/components/features/dashboard/UserMenu.vue
+<template>
+  <div class="relative">
+    <button
+      @click="toggleMenu"
+      class="flex items-center space-x-2 p-2 rounded-lg hover:bg-gray-100"
+    >
+      <div class="w-8 h-8 bg-primary-600 text-white rounded-full flex items-center justify-center text-sm font-medium">
+        {{ userInitials }}
+      </div>
+      <span v-if="user" class="text-sm font-medium text-gray-700">{{ user.full_name }}</span>
+      <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+      </svg>
+    </button>
+
+    <!-- Dropdown Menu -->
+    <div
+      v-if="isMenuOpen"
+      class="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-50"
+    >
+      <div class="py-1">
+        <button
+          @click="openSettings"
+          class="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+        >
+          <svg class="w-4 h-4 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+          </svg>
+          Settings
+        </button>
+
+        <button
+          @click="openUsage"
+          class="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+        >
+          <svg class="w-4 h-4 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+          </svg>
+          Usage
+        </button>
+
+        <router-link
+          to="/help"
+          @click="closeMenu"
+          class="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+        >
+          <svg class="w-4 h-4 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          Help
+        </router-link>
+
+        <hr class="my-1">
+
+        <button
+          @click="handleLogout"
+          class="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+        >
+          <svg class="w-4 h-4 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+          </svg>
+          Logout
+        </button>
+      </div>
+    </div>
+
+    <!-- Backdrop -->
+    <div
+      v-if="isMenuOpen"
+      @click="closeMenu"
+      class="fixed inset-0 z-40"
+    ></div>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
+import { storeToRefs } from 'pinia'
+import { useAuthStore } from '@/stores/auth'
+import { useUIStore } from '@/stores/ui'
+
+const router = useRouter()
+const authStore = useAuthStore()
+const uiStore = useUIStore()
+
+const { user } = storeToRefs(authStore)
+const isMenuOpen = ref(false)
+
+const userInitials = computed(() => {
+  if (!user.value?.full_name) return 'U'
+  return user.value.full_name
+    .split(' ')
+    .map(name => name[0])
+    .join('')
+    .toUpperCase()
+    .slice(0, 2)
+})
+
+const toggleMenu = () => {
+  isMenuOpen.value = !isMenuOpen.value
+}
+
+const closeMenu = () => {
+  isMenuOpen.value = false
+}
+
+const openSettings = () => {
+  uiStore.openSlideOut('UserSettingsPanel')
+  closeMenu()
+}
+
+const openUsage = () => {
+  uiStore.openSlideOut('QuickUsagePanel')
+  closeMenu()
+}
+
+const handleLogout = () => {
+  authStore.logout()
+  router.push({ name: 'Landing' })
+  closeMenu()
+}
+</script>
+
+### NEW FILE: src/components/features/dashboard/ChatInterface.vue
+<template>
+  <div class="h-full flex flex-col">
+    <!-- Chat Header -->
+    <div class="bg-white border-b border-gray-200 px-6 py-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h3 class="font-semibold text-gray-900">{{ currentChat.title || 'New Chat' }}</h3>
+          <p class="text-sm text-gray-600">{{ currentClass.name }}</p>
+        </div>
+        <div class="flex space-x-2">
+          <button class="p-2 rounded-lg hover:bg-gray-100" title="Upload document for this chat">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+            </svg>
+          </button>
+          <button class="p-2 rounded-lg hover:bg-gray-100" title="Chat settings">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Messages Area -->
+    <div class="flex-1 overflow-y-auto p-6 space-y-4">
+      <div v-if="messages.length === 0" class="text-center text-gray-500 mt-12">
+        <svg class="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+        </svg>
+        <p>Start a conversation with your AI tutor</p>
+        <p class="text-sm mt-1">Ask questions about your uploaded materials</p>
+      </div>
+
+      <div
+        v-for="message in messages"
+        :key="message.id"
+        :class="[
+          'flex',
+          message.is_user ? 'justify-end' : 'justify-start'
+        ]"
+      >
+        <div
+          :class="[
+            'max-w-[70%] rounded-lg px-4 py-2',
+            message.is_user 
+              ? 'bg-primary-600 text-white' 
+              : 'bg-white border border-gray-200'
+          ]"
+        >
+          <p class="whitespace-pre-wrap">{{ message.content }}</p>
+          <p class="text-xs mt-1 opacity-70">
+            {{ formatTime(message.timestamp) }}
+          </p>
+        </div>
+      </div>
+
+      <div v-if="isTyping" class="flex justify-start">
+        <div class="bg-white border border-gray-200 rounded-lg px-4 py-2">
+          <div class="flex space-x-1">
+            <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
+            <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.1s;"></div>
+            <div class="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style="animation-delay: 0.2s;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Message Input -->
+    <div class="bg-white border-t border-gray-200 p-4">
+      <div class="flex space-x-4">
+        <div class="flex-1">
+          <textarea
+            v-model="newMessage"
+            @keydown.enter.prevent="handleSendMessage"
+            placeholder="Type your message here..."
+            class="w-full p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+            rows="3"
+          ></textarea>
+        </div>
+        <div class="flex flex-col space-y-2">
+          <button
+            @click="handleSendMessage"
+            :disabled="!newMessage.trim() || isTyping"
+            class="btn-primary px-6 py-2"
+          >
+            Send
+          </button>
+          <button
+            @click="attachFile"
+            class="btn-secondary px-6 py-2"
+          >
+            Attach
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useClassStore } from '@/stores/classes'
+
+const classStore = useClassStore()
+const { currentClass, currentChat } = storeToRefs(classStore)
+
+const messages = ref([])
+const newMessage = ref('')
+const isTyping = ref(false)
+
+const handleSendMessage = async () => {
+  if (!newMessage.value.trim()) return
+
+  const userMessage = {
+    id: Date.now(),
+    content: newMessage.value,
+    is_user: true,
+    timestamp: new Date().toISOString()
+  }
+
+  messages.value.push(userMessage)
+  const messageContent = newMessage.value
+  newMessage.value = ''
+
+  // Show typing indicator
+  isTyping.value = true
+
+  // Simulate AI response (replace with actual API call)
+  setTimeout(() => {
+    const aiResponse = {
+      id: Date.now() + 1,
+      content: `This is a mock AI response to: "${messageContent}"\n\nI would analyze your uploaded documents and provide a contextual response based on the content.`,
+      is_user: false,
+      timestamp: new Date().toISOString()
+    }
+    
+    messages.value.push(aiResponse)
+    isTyping.value = false
+  }, 2000)
+}
+
+const attachFile = () => {
+  console.log('Open file upload modal for chat-specific documents')
+}
+
+const formatTime = (timestamp) => {
+  return new Date(timestamp).toLocaleTimeString([], { 
+    hour: '2-digit', 
+    minute: '2-digit' 
+  })
+}
+
+onMounted(() => {
+  // Load existing messages for this chat
+  // This would come from your API
+})
+</script>
+
+### NEW FILE: src/components/features/dashboard/WelcomeScreen.vue
+<template>
+  <div class="h-full flex items-center justify-center bg-gray-50">
+    <div class="text-center max-w-md">
+      <div class="mb-8">
+        <svg class="w-16 h-16 mx-auto text-primary-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path>
+        </svg>
+        <h2 class="text-2xl font-bold text-gray-900 mb-2">Welcome to StudHelper</h2>
+        <p class="text-gray-600">Your personal AI study assistant</p>
+      </div>
+
+      <div class="space-y-4">
+        <div v-if="classes.length === 0" class="bg-white p-6 rounded-lg shadow-sm">
+          <h3 class="font-semibold text-gray-900 mb-2">Get Started</h3>
+          <p class="text-gray-600 mb-4">Create your first study class to begin learning with AI</p>
+          <button
+            @click="createClass"
+            class="btn-primary"
+          >
+            Create Your First Class
+          </button>
+        </div>
+
+        <div v-else class="bg-white p-6 rounded-lg shadow-sm">
+          <h3 class="font-semibold text-gray-900 mb-2">Ready to Study?</h3>
+          <p class="text-gray-600 mb-4">Select a class from the sidebar or start a new chat session</p>
+          
+          <div class="space-y-2">
+            <div class="text-sm text-gray-500">
+              <strong>{{ classes.length }}</strong> classes created
+            </div>
+            <div class="text-sm text-gray-500">
+              <strong>{{ totalChats }}</strong> chat sessions
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <button
+            @click="createClass"
+            class="bg-white p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow"
+          >
+            <svg class="w-8 h-8 text-primary-600 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+            </svg>
+            <p class="font-medium text-gray-900">New Class</p>
+            <p class="text-sm text-gray-600">Create a study class</p>
+          </button>
+
+          <router-link
+            to="/help"
+            class="bg-white p-4 rounded-lg shadow-sm hover:shadow-md transition-shadow block"
+          >
+            <svg class="w-8 h-8 text-primary-600 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <p class="font-medium text-gray-900">Get Help</p>
+            <p class="text-sm text-gray-600">Learn how to use StudHelper</p>
+          </router-link>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useUIStore } from '@/stores/ui'
+import { useClassStore } from '@/stores/classes'
+
+const uiStore = useUIStore()
+const classStore = useClassStore()
+
+const { classes } = storeToRefs(classStore)
+
+const totalChats = computed(() => {
+  return classes.value.reduce((total, classItem) => {
+    return total + (classItem.chats?.length || 0)
+  }, 0)
+})
+
+const createClass = () => {
+  uiStore.openModal('CreateClassModal')
+}
+</script>
+
+### NEW FILE: src/services/api.js
+import axios from 'axios'
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+
+// Create axios instance
+const api = axios.create({
+  baseURL: `${API_BASE_URL}/api/v1`,
+  timeout: 30000,
+  headers: {
+    'Content-Type': 'application/json'
+  }
+})
+
+// Request interceptor to add auth token
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
+
+// Response interceptor to handle auth errors
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token')
+      window.location.href = '/'
+    }
+    return Promise.reject(error)
+  }
+)
+
+export default api
+
+### NEW FILE: src/services/auth/authService.js
+import api from '../api'
+
+export const authService = {
+  async login(credentials) {
+    return api.post('/auth/login', {
+      username: credentials.email,
+      password: credentials.password
+    })
+  },
+
+  async register(userData) {
+    return api.post('/auth/register', userData)
+  },
+
+  async getCurrentUser() {
+    return api.get('/auth/me')
+  },
+
+  async updateProfile(userData) {
+    return api.put('/auth/profile', userData)
+  },
+
+  async logout() {
+    return api.post('/auth/logout')
+  }
+}
+
+### NEW FILE: src/services/classes/classService.js
+import api from '../api'
+
+export const classService = {
+  async getClasses() {
+    return api.get('/classes')
+  },
+
+  async createClass(classData) {
+    return api.post('/classes', classData)
+  },
+
+  async getClass(classId) {
+    return api.get(`/classes/${classId}`)
+  },
+
+  async updateClass(classId, classData) {
+    return api.put(`/classes/${classId}`, classData)
+  },
+
+  async deleteClass(classId) {
+    return api.delete(`/classes/${classId}`)
+  },
+
+  async joinClass(classCode) {
+    return api.post('/classes/join', { class_code: classCode })
+  },
+
+  async getClassMembers(classId) {
+    return api.get(`/classes/${classId}/members`)
+  }
+}
+
+### NEW FILE: src/services/content/chatService.js
+import api from '../api'
+
+export const chatService = {
+  async getChatSessions(classId) {
+    return api.get(`/chat/sessions?class_id=${classId}`)
+  },
+
+  async createChatSession(sessionData) {
+    return api.post('/chat/sessions', sessionData)
+  },
+
+  async getChatMessages(sessionId) {
+    return api.get(`/chat/sessions/${sessionId}/messages`)
+  },
+
+  async sendMessage(sessionId, messageData) {
+    return api.post(`/chat/sessions/${sessionId}/messages`, messageData)
+  },
+
+  async deleteSession(sessionId) {
+    return api.delete(`/chat/sessions/${sessionId}`)
+  }
+}
+
+### NEW FILE: src/services/content/documentService.js
+import api from '../api'
+
+export const documentService = {
+  async uploadClassDocument(classId, file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    
+    return api.post(`/documents/classes/${classId}/upload`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+  },
+
+  async uploadChatDocument(sessionId, file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    
+    return api.post(`/documents/sessions/${sessionId}/upload`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+  },
+
+  async getClassDocuments(classId) {
+    return api.get(`/documents/classes/${classId}`)
+  },
+
+  async getChatDocuments(sessionId) {
+    return api.get(`/documents/sessions/${sessionId}`)
+  },
+
+  async deleteDocument(documentId) {
+    return api.delete(`/documents/${documentId}`)
+  }
+}
+
+### NEW FILE: src/components/ui/ModalWrapper.vue
+<template>
+  <teleport to="#modal-container">
+    <div v-if="isVisible" class="modal-overlay" @click.self="handleBackdropClick">
+      <div class="modal-content">
+        <slot />
+      </div>
+    </div>
+  </teleport>
+</template>
+
+<script setup>
+defineProps({
+  isVisible: {
+    type: Boolean,
+    default: false
+  },
+  closeOnBackdrop: {
+    type: Boolean,
+    default: true
+  }
+})
+
+const emit = defineEmits(['close'])
+
+const handleBackdropClick = () => {
+  if (props.closeOnBackdrop) {
+    emit('close')
+  }
+}
+</script>
+
+### NEW FILE: src/components/ui/SlideOutWrapper.vue
+<template>
+  <teleport to="#slideout-container">
+    <div v-if="isVisible" class="slideout-overlay">
+      <!-- Backdrop -->
+      <div 
+        class="absolute inset-0 bg-black bg-opacity-25" 
+        @click="handleBackdropClick"
+      ></div>
+      
+      <!-- Slide out content -->
+      <div :class="[
+        'slideout-content',
+        isVisible ? 'translate-x-0' : 'translate-x-full'
+      ]">
+        <slot />
+      </div>
+    </div>
+  </teleport>
+</template>
+
+<script setup>
+const props = defineProps({
+  isVisible: {
+    type: Boolean,
+    default: false
+  },
+  closeOnBackdrop: {
+    type: Boolean,
+    default: true
+  }
+})
+
+const emit = defineEmits(['close'])
+
+const handleBackdropClick = () => {
+  if (props.closeOnBackdrop) {
+    emit('close')
+  }
+}
+</script>
+
+### NEW FILE: .env.example
+# API Configuration
+VITE_API_BASE_URL=http://localhost:8000
+
+# App Configuration
+VITE_APP_NAME=StudHelper
+VITE_APP_VERSION=0.1.0
