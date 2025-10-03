@@ -20,6 +20,8 @@ class UserResponse(UserBase):
     id: int
     created_at: datetime
     is_active: bool
+    auth_provider: str  # NEW
+    email_verified: bool  # NEW
     
     class Config:
         from_attributes = True
@@ -33,6 +35,11 @@ class Token(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+class FirebaseLoginRequest(BaseModel):
+    id_token: str
+    username: Optional[str] = None
+    full_name: Optional[str] = None
 
 # Class schemas
 class ClassBase(BaseModel):
@@ -178,4 +185,5 @@ class UsageRecord(BaseModel):
     timestamp: datetime
     is_sponsored: bool
     is_overflow: bool
+
 

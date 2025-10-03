@@ -23,10 +23,15 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     username = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
+    hashed_password = Column(String, nullable=True)  # CHANGED: nullable=True for Firebase OAuth users
     full_name = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True)
+    
+    # NEW: Firebase authentication fields
+    firebase_uid = Column(String, unique=True, nullable=True, index=True)
+    auth_provider = Column(String, default='email')  # 'email', 'google', 'microsoft'
+    email_verified = Column(Boolean, default=False)
     
     # Relationships - specify foreign_keys to resolve ambiguity
     owned_classes = relationship("Class", back_populates="owner")
@@ -196,3 +201,5 @@ class UsageRecord(Base):
     
     # Relationships
     user = relationship("User", back_populates="usage_records", foreign_keys=[user_id])
+
+

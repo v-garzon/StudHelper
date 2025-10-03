@@ -32,8 +32,13 @@ const router = createRouter({
 })
 
 // Navigation guards
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
+  
+  // CRITICAL FIX: If we have a token but no user, initialize auth first
+  if (authStore.token && !authStore.user && !authStore.isLoading) {
+    await authStore.initializeAuth()
+  }
   
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
     next({ name: 'Landing' })
@@ -45,4 +50,3 @@ router.beforeEach((to, from, next) => {
 })
 
 export default router
-

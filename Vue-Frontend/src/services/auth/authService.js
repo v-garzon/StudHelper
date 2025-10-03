@@ -12,6 +12,11 @@ export const authService = {
     return api.post('/auth/register', userData)
   },
 
+  // NEW: Firebase login
+  async firebaseLogin(payload) {
+    return api.post('/auth/firebase-login', payload)
+  },
+
   async getCurrentUser() {
     return api.get('/auth/me')
   },
@@ -24,4 +29,5 @@ export const authService = {
     return api.post('/auth/logout')
   }
 }
+
 

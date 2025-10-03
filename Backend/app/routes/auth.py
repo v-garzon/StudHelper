@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.schemas import UserCreate, UserResponse, UserUpdate, LoginRequest, Token
+from app.schemas import UserCreate, UserResponse, UserUpdate, LoginRequest, Token, FirebaseLoginRequest
 from app.services.auth_service import AuthService
 from app.utils.security import get_current_user
 import logging
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(user_data: UserCreate, db: Session = Depends(get_db)):
-    """Register a new user"""
+    """Register a new user (legacy email/password method)"""
     try:
         auth_service = AuthService()
         user = await auth_service.create_user(db, user_data)
@@ -27,7 +27,7 @@ async def register(user_data: UserCreate, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=Token)
 async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
-    """Authenticate user and return JWT token"""
+    """Authenticate user with email/password (legacy method)"""
     try:
         auth_service = AuthService()
         token_data = await auth_service.authenticate_user(db, login_data.username, login_data.password)
@@ -37,6 +37,25 @@ async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail=str(e))
     except Exception as e:
         logger.error(f"Error during login: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/firebase-login", response_model=Token)
+async def firebase_login(request: FirebaseLoginRequest, db: Session = Depends(get_db)):
+    """Authenticate user via Firebase token (primary authentication method)"""
+    try:
+        auth_service = AuthService()
+        token_data = await auth_service.firebase_authenticate(
+            db, 
+            request.id_token,
+            username=request.username,
+            full_name=request.full_name
+        )
+        logger.info(f"Firebase user logged in")
+        return token_data
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error during Firebase login: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/logout")
@@ -82,4 +101,5 @@ async def delete_account(
     except Exception as e:
         logger.error(f"Error deleting account: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
 

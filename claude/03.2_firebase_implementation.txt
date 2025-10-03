@@ -1,0 +1,1893 @@
+# StudHelper - Firebase Authentication Implementation
+# Complete code for adding Firebase OAuth + Email/Password authentication
+# All authentication now handled by Firebase, backend manages user data
+
+# ============================================================================
+# BACKEND FILES
+# ============================================================================
+
+### NEW FILE: Backend/app/firebase_admin.py
+import firebase_admin
+from firebase_admin import credentials, auth
+from app.config import get_settings
+import logging
+
+logger = logging.getLogger(__name__)
+settings = get_settings()
+
+# Initialize Firebase Admin SDK
+def initialize_firebase():
+    """Initialize Firebase Admin SDK with service account credentials"""
+    try:
+        cred = credentials.Certificate(settings.FIREBASE_CREDENTIALS_PATH)
+        firebase_admin.initialize_app(cred, {
+            'projectId': settings.FIREBASE_PROJECT_ID
+        })
+        logger.info("Firebase Admin SDK initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize Firebase: {e}")
+        raise
+
+def verify_firebase_token(id_token: str) -> dict:
+    """
+    Verify Firebase ID token and return decoded token
+    
+    Args:
+        id_token: Firebase ID token from client
+    
+    Returns:
+        dict with:
+            - uid: Firebase user ID
+            - email: User email
+            - email_verified: Boolean
+            - name: Display name (if available)
+            - firebase: Provider information
+    
+    Raises:
+        ValueError: If token is invalid or expired
+    """
+    try:
+        decoded_token = auth.verify_id_token(id_token)
+        return decoded_token
+    except auth.InvalidIdTokenError:
+        raise ValueError("Invalid Firebase token")
+    except auth.ExpiredIdTokenError:
+        raise ValueError("Firebase token expired")
+    except Exception as e:
+        logger.error(f"Firebase token verification error: {e}")
+        raise ValueError("Token verification failed")
+
+
+### NEW FILE: Backend/migrations/versions/add_firebase_auth.py
+"""Add Firebase authentication fields
+
+Revision ID: add_firebase_auth
+Revises: [YOUR_PREVIOUS_REVISION]
+Create Date: 2025-01-15
+
+"""
+from alembic import op
+import sqlalchemy as sa
+
+# revision identifiers, used by Alembic.
+revision = 'add_firebase_auth'
+down_revision = None  # Replace with your previous migration
+branch_labels = None
+depends_on = None
+
+def upgrade():
+    # Add new columns for Firebase authentication
+    op.add_column('users', sa.Column('firebase_uid', sa.String(), nullable=True))
+    op.add_column('users', sa.Column('auth_provider', sa.String(), server_default='email', nullable=False))
+    op.add_column('users', sa.Column('email_verified', sa.Boolean(), server_default='false', nullable=False))
+    
+    # Create unique index on firebase_uid
+    op.create_index('ix_users_firebase_uid', 'users', ['firebase_uid'], unique=True)
+    
+    # Make hashed_password nullable (Firebase OAuth users don't have passwords)
+    op.alter_column('users', 'hashed_password', nullable=True)
+
+def downgrade():
+    # Remove Firebase authentication columns
+    op.drop_index('ix_users_firebase_uid', table_name='users')
+    op.drop_column('users', 'email_verified')
+    op.drop_column('users', 'auth_provider')
+    op.drop_column('users', 'firebase_uid')
+    
+    # Make hashed_password non-nullable again
+    op.alter_column('users', 'hashed_password', nullable=False)
+
+
+### MODIFIED FILE: Backend/app/models/__init__.py
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Float, Boolean, Date, UniqueConstraint
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship
+from datetime import datetime, date
+import enum
+from sqlalchemy import Enum
+
+Base = declarative_base()
+
+class ProcessingStatus(enum.Enum):
+    PENDING = "pending"
+    PROCESSING = "processing" 
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+class DocumentScope(enum.Enum):
+    CLASS = "class"    # Available to all chats in the class
+    CHAT = "chat"      # Only available to specific chat session
+
+class User(Base):
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    username = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=True)  # CHANGED: nullable=True for Firebase OAuth users
+    full_name = Column(String)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+    
+    # NEW: Firebase authentication fields
+    firebase_uid = Column(String, unique=True, nullable=True, index=True)
+    auth_provider = Column(String, default='email')  # 'email', 'google', 'microsoft'
+    email_verified = Column(Boolean, default=False)
+    
+    # Relationships - specify foreign_keys to resolve ambiguity
+    owned_classes = relationship("Class", back_populates="owner")
+    class_memberships = relationship("ClassMembership", back_populates="user")
+    chat_sessions = relationship("ChatSession", back_populates="user")
+    usage_records = relationship("UsageRecord", back_populates="user", foreign_keys="UsageRecord.user_id")
+
+class Class(Base):
+    __tablename__ = "classes"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text)
+    class_code = Column(String, unique=True, index=True, nullable=False)
+    owner_id = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    owner = relationship("User", back_populates="owned_classes")
+    memberships = relationship("ClassMembership", back_populates="class_obj")
+    documents = relationship("Document", back_populates="class_obj")
+    chat_sessions = relationship("ChatSession", back_populates="class_obj")
+
+class ClassMembership(Base):
+    """Class membership with granular permissions"""
+    __tablename__ = "class_memberships"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    class_id = Column(Integer, ForeignKey("classes.id"))
+    joined_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Permission flags
+    is_manager = Column(Boolean, default=False)
+    can_read = Column(Boolean, default=True)
+    can_chat = Column(Boolean, default=True)
+    max_concurrent_chats = Column(Integer, default=3)
+    can_share_class = Column(Boolean, default=False)
+    can_upload_documents = Column(Boolean, default=True)
+    
+    # Billing and limits
+    is_sponsored = Column(Boolean, default=False)
+    daily_token_limit = Column(Integer, default=1_000_000)    # 1M tokens
+    weekly_token_limit = Column(Integer, default=5_000_000)   # 5M tokens
+    monthly_token_limit = Column(Integer, default=15_000_000) # 15M tokens
+    
+    # Relationships
+    user = relationship("User", back_populates="class_memberships")
+    class_obj = relationship("Class", back_populates="memberships")
+    
+    __table_args__ = (
+        UniqueConstraint('user_id', 'class_id', name='_user_class_membership_uc'),
+    )
+
+class ClassUsageTracker(Base):
+    """Per-class, per-user usage tracking"""
+    __tablename__ = "class_usage_trackers"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    class_id = Column(Integer, ForeignKey("classes.id"))
+    
+    # Current usage counters
+    daily_tokens_used = Column(Integer, default=0)
+    weekly_tokens_used = Column(Integer, default=0)
+    monthly_tokens_used = Column(Integer, default=0)
+    
+    # Reset tracking (Madrid timezone)
+    last_daily_reset = Column(Date, default=date.today)
+    last_weekly_reset = Column(Date, default=date.today)
+    last_monthly_reset = Column(Date, default=date.today)
+    
+    __table_args__ = (
+        UniqueConstraint('user_id', 'class_id', name='_user_class_usage_uc'),
+    )
+
+class Document(Base):
+    __tablename__ = "documents"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    filename = Column(String, nullable=False)
+    original_filename = Column(String, nullable=False)
+    file_path = Column(String, nullable=False)
+    file_type = Column(String, nullable=False)
+    file_size = Column(Integer, nullable=False)
+    
+    # Dual-level document system
+    scope = Column(Enum(DocumentScope), nullable=False)
+    class_id = Column(Integer, ForeignKey("classes.id"))
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True)
+    
+    uploaded_by = Column(Integer, ForeignKey("users.id"))
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    processing_status = Column(Enum(ProcessingStatus), default=ProcessingStatus.PENDING)
+    processing_error = Column(Text, nullable=True)
+    
+    # Relationships
+    class_obj = relationship("Class", back_populates="documents")
+    session = relationship("ChatSession", back_populates="documents")
+    chunks = relationship("DocumentChunk", back_populates="document")
+
+class DocumentChunk(Base):
+    __tablename__ = "document_chunks"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id"))
+    content = Column(Text, nullable=False)
+    chunk_index = Column(Integer, nullable=False)
+    char_start = Column(Integer, nullable=False)
+    char_end = Column(Integer, nullable=False)
+    vector_id = Column(String, nullable=True)  # Vector store ID
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    document = relationship("Document", back_populates="chunks")
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    class_id = Column(Integer, ForeignKey("classes.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    user = relationship("User", back_populates="chat_sessions")
+    class_obj = relationship("Class", back_populates="chat_sessions")
+    documents = relationship("Document", back_populates="session")
+    messages = relationship("ChatMessage", back_populates="session")
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"))
+    content = Column(Text, nullable=False)
+    is_user = Column(Boolean, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    response_time_ms = Column(Integer, nullable=True)
+    context_used = Column(Text, nullable=True)
+    tokens_used = Column(Integer, default=0)
+    
+    # Relationships
+    session = relationship("ChatSession", back_populates="messages")
+
+class UsageRecord(Base):
+    __tablename__ = "usage_records"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    model_name = Column(String, nullable=False)
+    operation_type = Column(String, nullable=False)  # 'chat', 'embedding'
+    input_tokens = Column(Integer, default=0)
+    output_tokens = Column(Integer, default=0)
+    cost = Column(Float, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True)
+    
+    # Billing attribution
+    billed_to_user_id = Column(Integer, ForeignKey("users.id"))
+    is_sponsored = Column(Boolean, default=False)
+    is_overflow = Column(Boolean, default=False)
+    
+    # Relationships
+    user = relationship("User", back_populates="usage_records", foreign_keys=[user_id])
+
+
+### MODIFIED FILE: Backend/app/schemas/__init__.py
+from pydantic import BaseModel, EmailStr
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+from app.models import ProcessingStatus, DocumentScope
+
+# User schemas
+class UserBase(BaseModel):
+    email: EmailStr
+    username: str
+    full_name: Optional[str] = None
+
+class UserCreate(UserBase):
+    password: str
+
+class UserUpdate(BaseModel):
+    email: Optional[EmailStr] = None
+    full_name: Optional[str] = None
+
+class UserResponse(UserBase):
+    id: int
+    created_at: datetime
+    is_active: bool
+    auth_provider: str  # NEW
+    email_verified: bool  # NEW
+    
+    class Config:
+        from_attributes = True
+
+# Auth schemas
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+    user: UserResponse
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class FirebaseLoginRequest(BaseModel):
+    id_token: str
+    username: Optional[str] = None
+    full_name: Optional[str] = None
+
+# Class schemas
+class ClassBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+class ClassCreate(ClassBase):
+    pass
+
+class ClassResponse(ClassBase):
+    id: int
+    class_code: str
+    owner_id: int
+    created_at: datetime
+    is_active: bool
+    member_count: Optional[int] = 0
+    
+    class Config:
+        from_attributes = True
+
+class JoinClassRequest(BaseModel):
+    class_code: str
+
+# Permission schemas
+class PermissionUpdate(BaseModel):
+    can_read: Optional[bool] = None
+    can_chat: Optional[bool] = None
+    max_concurrent_chats: Optional[int] = None
+    can_share_class: Optional[bool] = None
+    can_upload_documents: Optional[bool] = None
+    daily_token_limit: Optional[int] = None
+    weekly_token_limit: Optional[int] = None
+    monthly_token_limit: Optional[int] = None
+
+class MembershipResponse(BaseModel):
+    id: int
+    user_id: int
+    username: str
+    full_name: Optional[str]
+    joined_at: datetime
+    is_manager: bool
+    can_read: bool
+    can_chat: bool
+    max_concurrent_chats: int
+    can_share_class: bool
+    can_upload_documents: bool
+    is_sponsored: bool
+    daily_token_limit: int
+    weekly_token_limit: int
+    monthly_token_limit: int
+    
+    class Config:
+        from_attributes = True
+
+class SponsorshipUpdate(BaseModel):
+    is_sponsored: bool
+
+# Document schemas
+class DocumentResponse(BaseModel):
+    id: int
+    filename: str
+    original_filename: str
+    file_type: str
+    file_size: int
+    scope: DocumentScope
+    class_id: int
+    session_id: Optional[int]
+    uploaded_by: int
+    uploaded_at: datetime
+    processing_status: ProcessingStatus
+    processing_error: Optional[str]
+    
+    class Config:
+        from_attributes = True
+
+# Chat schemas
+class ChatSessionCreate(BaseModel):
+    title: str
+    class_id: int
+
+class ChatSessionResponse(BaseModel):
+    id: int
+    title: str
+    user_id: int
+    class_id: int
+    created_at: datetime
+    updated_at: datetime
+    is_active: bool
+    message_count: Optional[int] = 0
+    
+    class Config:
+        from_attributes = True
+
+class MessageCreate(BaseModel):
+    content: str
+
+class MessageResponse(BaseModel):
+    id: int
+    session_id: int
+    content: str
+    is_user: bool
+    timestamp: datetime
+    response_time_ms: Optional[int]
+    context_used: Optional[str]
+    tokens_used: int
+    
+    class Config:
+        from_attributes = True
+
+class ChatResponse(BaseModel):
+    user_message: MessageResponse
+    ai_response: MessageResponse
+    cost: float
+    response_time_ms: int
+    context_provided: bool
+
+# Usage schemas
+class UsageStats(BaseModel):
+    daily_tokens_used: int
+    weekly_tokens_used: int
+    monthly_tokens_used: int
+    daily_limit: int
+    weekly_limit: int
+    monthly_limit: int
+    daily_remaining: int
+    weekly_remaining: int
+    monthly_remaining: int
+
+class ClassUsageOverview(BaseModel):
+    user_id: int
+    username: str
+    usage_stats: UsageStats
+    is_sponsored: bool
+    last_activity: Optional[datetime]
+
+class UsageRecord(BaseModel):
+    id: int
+    model_name: str
+    operation_type: str
+    input_tokens: int
+    output_tokens: int
+    cost: float
+    timestamp: datetime
+    is_sponsored: bool
+    is_overflow: bool
+
+
+### MODIFIED FILE: Backend/app/services/auth_service.py
+from sqlalchemy.orm import Session
+from app.models import User
+from app.schemas import UserCreate, UserUpdate, UserResponse, Token
+from app.utils.security import get_password_hash, verify_password, create_access_token
+from app.firebase_admin import verify_firebase_token
+from datetime import timedelta
+from app.config import get_settings
+from typing import Optional
+import logging
+
+settings = get_settings()
+logger = logging.getLogger(__name__)
+
+class AuthService:
+    async def create_user(self, db: Session, user_data: UserCreate) -> UserResponse:
+        """Create a new user with email/password (legacy method, kept for compatibility)"""
+        # Check if email already exists
+        existing_user = db.query(User).filter(User.email == user_data.email).first()
+        if existing_user:
+            raise ValueError("Email already registered")
+        
+        # Check if username already exists
+        existing_username = db.query(User).filter(User.username == user_data.username).first()
+        if existing_username:
+            raise ValueError("Username already taken")
+        
+        # Create new user
+        hashed_password = get_password_hash(user_data.password)
+        new_user = User(
+            email=user_data.email,
+            username=user_data.username,
+            full_name=user_data.full_name,
+            hashed_password=hashed_password
+        )
+        
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        return UserResponse.model_validate(new_user)
+    
+    async def authenticate_user(self, db: Session, username: str, password: str) -> Token:
+        """Authenticate user with email/password (legacy method)"""
+        # Check if username is an email or actual username
+        user = db.query(User).filter(
+            (User.username == username) | (User.email == username)
+        ).first()
+        
+        if not user:
+            raise ValueError(f"Username or email {username} does not exist")
+        if not user.is_active:
+            raise ValueError("Account is deactivated")
+        if not user.hashed_password:
+            raise ValueError("This account uses social login. Please sign in with Google or Microsoft.")
+        if not verify_password(password, user.hashed_password):
+            raise ValueError("Incorrect password")
+        
+        # Create JWT token
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.username}, expires_delta=access_token_expires
+        )
+        user_response = UserResponse.model_validate(user)
+        return Token(
+            access_token=access_token,
+            token_type="bearer",
+            user=user_response
+        )
+    
+    async def firebase_authenticate(self, db: Session, id_token: str, 
+                                    username: Optional[str] = None,
+                                    full_name: Optional[str] = None) -> Token:
+        """
+        Authenticate user via Firebase token
+        Creates user if first time, returns JWT token
+        
+        Args:
+            db: Database session
+            id_token: Firebase ID token from frontend
+            username: Optional username for email/password registration
+            full_name: Optional full name for email/password registration
+        
+        Returns:
+            Token with JWT and user data
+        """
+        # Step 1: Verify Firebase token
+        try:
+            decoded_token = verify_firebase_token(id_token)
+        except ValueError as e:
+            raise ValueError(f"Firebase authentication failed: {str(e)}")
+        
+        firebase_uid = decoded_token['uid']
+        email = decoded_token.get('email')
+        email_verified = decoded_token.get('email_verified', False)
+        display_name = decoded_token.get('name', '')
+        
+        # Determine provider
+        provider_data = decoded_token.get('firebase', {}).get('sign_in_provider', 'unknown')
+        if provider_data == 'google.com':
+            auth_provider = 'google'
+        elif provider_data == 'microsoft.com':
+            auth_provider = 'microsoft'
+        elif provider_data == 'password':
+            auth_provider = 'firebase_email'
+        else:
+            auth_provider = 'firebase'
+        
+        if not email:
+            raise ValueError("Email not provided by Firebase")
+        
+        # Step 2: Check if user exists by firebase_uid
+        user = db.query(User).filter(User.firebase_uid == firebase_uid).first()
+        
+        if user:
+            # Existing Firebase user - update verification status
+            user.email_verified = email_verified
+            db.commit()
+            db.refresh(user)
+            logger.info(f"Existing Firebase user logged in: {email}")
+        else:
+            # Check if email already exists (user switching from email/password to OAuth)
+            user = db.query(User).filter(User.email == email).first()
+            
+            if user:
+                # Link existing account to Firebase
+                logger.info(f"Linking existing account to Firebase: {email}")
+                user.firebase_uid = firebase_uid
+                user.auth_provider = auth_provider
+                user.email_verified = email_verified
+                db.commit()
+                db.refresh(user)
+            else:
+                # New user - create account
+                # Use provided username or generate from email
+                if not username:
+                    username = self._generate_username_from_email(email, db)
+                
+                # Use provided full_name or display name from OAuth
+                if not full_name:
+                    full_name = display_name
+                
+                user = User(
+                    email=email,
+                    username=username,
+                    full_name=full_name,
+                    firebase_uid=firebase_uid,
+                    auth_provider=auth_provider,
+                    email_verified=email_verified,
+                    hashed_password=None,  # No password for Firebase users
+                    is_active=True
+                )
+                
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+                
+                logger.info(f"New Firebase user created: {email} via {auth_provider}")
+        
+        # Step 3: Create YOUR JWT token
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.username}, expires_delta=access_token_expires
+        )
+        
+        user_response = UserResponse.model_validate(user)
+        return Token(
+            access_token=access_token,
+            token_type="bearer",
+            user=user_response
+        )
+    
+    def _generate_username_from_email(self, email: str, db: Session) -> str:
+        """Generate unique username from email"""
+        base_username = email.split('@')[0].lower()
+        # Remove special characters
+        base_username = ''.join(c for c in base_username if c.isalnum() or c == '_')
+        username = base_username
+        counter = 1
+        
+        while db.query(User).filter(User.username == username).first():
+            username = f"{base_username}{counter}"
+            counter += 1
+        
+        return username
+    
+    async def update_user(self, db: Session, user_id: int, user_update: UserUpdate) -> UserResponse:
+        """Update user profile"""
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise ValueError("User not found")
+        
+        update_data = user_update.model_dump(exclude_unset=True)
+        
+        # Check email uniqueness if email is being updated
+        if "email" in update_data:
+            existing_user = db.query(User).filter(
+                User.email == update_data["email"],
+                User.id != user_id
+            ).first()
+            if existing_user:
+                raise ValueError("Email already taken")
+        
+        # Update user
+        for field, value in update_data.items():
+            setattr(user, field, value)
+        
+        db.commit()
+        db.refresh(user)
+        
+        return UserResponse.model_validate(user)
+    
+    async def delete_user(self, db: Session, user_id: int):
+        """Delete user account (soft delete)"""
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise ValueError("User not found")
+        
+        # Soft delete by deactivating
+        user.is_active = False
+        db.commit()
+
+
+### MODIFIED FILE: Backend/app/routes/auth.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.orm import Session
+from app.database import get_db
+from app.schemas import UserCreate, UserResponse, UserUpdate, LoginRequest, Token, FirebaseLoginRequest
+from app.services.auth_service import AuthService
+from app.utils.security import get_current_user
+import logging
+
+router = APIRouter()
+security = HTTPBearer()
+logger = logging.getLogger(__name__)
+
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def register(user_data: UserCreate, db: Session = Depends(get_db)):
+    """Register a new user (legacy email/password method)"""
+    try:
+        auth_service = AuthService()
+        user = await auth_service.create_user(db, user_data)
+        logger.info(f"New user registered: {user.email}")
+        return user
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error registering user: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/login", response_model=Token)
+async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
+    """Authenticate user with email/password (legacy method)"""
+    try:
+        auth_service = AuthService()
+        token_data = await auth_service.authenticate_user(db, login_data.username, login_data.password)
+        logger.info(f"User logged in: {login_data.username}")
+        return token_data
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error during login: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/firebase-login", response_model=Token)
+async def firebase_login(request: FirebaseLoginRequest, db: Session = Depends(get_db)):
+    """Authenticate user via Firebase token (primary authentication method)"""
+    try:
+        auth_service = AuthService()
+        token_data = await auth_service.firebase_authenticate(
+            db, 
+            request.id_token,
+            username=request.username,
+            full_name=request.full_name
+        )
+        logger.info(f"Firebase user logged in")
+        return token_data
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error during Firebase login: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/logout")
+async def logout(current_user: UserResponse = Depends(get_current_user)):
+    """Logout user (client should discard token)"""
+    logger.info(f"User logged out: {current_user.username}")
+    return {"message": "Successfully logged out"}
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_profile(current_user: UserResponse = Depends(get_current_user)):
+    """Get current user profile"""
+    return current_user
+
+@router.put("/profile", response_model=UserResponse)
+async def update_profile(
+    user_update: UserUpdate,
+    current_user: UserResponse = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update user profile"""
+    try:
+        auth_service = AuthService()
+        updated_user = await auth_service.update_user(db, current_user.id, user_update)
+        logger.info(f"User profile updated: {current_user.username}")
+        return updated_user
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error updating profile: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.delete("/account")
+async def delete_account(
+    current_user: UserResponse = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete user account"""
+    try:
+        auth_service = AuthService()
+        await auth_service.delete_user(db, current_user.id)
+        logger.info(f"User account deleted: {current_user.username}")
+        return {"message": "Account successfully deleted"}
+    except Exception as e:
+        logger.error(f"Error deleting account: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+### MODIFIED FILE: Backend/app/config.py
+from pydantic_settings import BaseSettings
+from functools import lru_cache
+
+class Settings(BaseSettings):
+    # Database
+    DATABASE_URL: str
+    
+    # JWT
+    SECRET_KEY: str
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 1 week
+    
+    # Firebase
+    FIREBASE_PROJECT_ID: str
+    FIREBASE_CREDENTIALS_PATH: str = "./firebase-credentials.json"
+    
+    # API
+    API_V1_PREFIX: str = "/api/v1"
+    
+    class Config:
+        env_file = ".env"
+
+@lru_cache()
+def get_settings():
+    return Settings()
+
+
+### MODIFIED FILE: Backend/app/main.py
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.routes import auth
+from app.firebase_admin import initialize_firebase
+from app.config import get_settings
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+settings = get_settings()
+
+app = FastAPI(
+    title="StudHelper API",
+    description="AI-powered study assistant with class-based learning",
+    version="1.0.0"
+)
+
+# CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # Frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include routers
+app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services on startup"""
+    logger.info("Starting StudHelper API...")
+    
+    # Initialize Firebase Admin SDK
+    try:
+        initialize_firebase()
+        logger.info("Firebase initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize Firebase: {e}")
+        # Don't crash the app, but log the error
+    
+    logger.info("StudHelper API started successfully")
+
+@app.get("/")
+async def root():
+    return {
+        "message": "StudHelper API",
+        "version": "1.0.0",
+        "status": "running"
+    }
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+
+### MODIFIED FILE: Backend/requirements.txt
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+pydantic==2.5.0
+pydantic-settings==2.1.0
+python-dotenv==1.0.0
+alembic==1.13.0
+firebase-admin==6.5.0
+
+
+### MODIFIED FILE: Backend/.env.example
+# Database
+DATABASE_URL=postgresql://user:password@localhost:5432/studhelper
+
+# JWT
+SECRET_KEY=your-secret-key-here-change-in-production
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=10080
+
+# Firebase
+FIREBASE_PROJECT_ID=your-firebase-project-id
+FIREBASE_CREDENTIALS_PATH=./firebase-credentials.json
+
+# API
+API_V1_PREFIX=/api/v1
+
+
+### MODIFIED FILE: Backend/.gitignore
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Environment
+.env
+.env.local
+
+# Firebase
+firebase-credentials.json
+
+# Database
+*.db
+*.sqlite
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+logs/
+*.log
+
+# Uploads
+uploads/*
+!uploads/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+
+# ============================================================================
+# FRONTEND FILES
+# ============================================================================
+
+### NEW FILE: Vue-Frontend/src/config/firebase.js
+import { initializeApp } from 'firebase/app'
+import { 
+  getAuth, 
+  GoogleAuthProvider,
+  OAuthProvider,
+  signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
+  sendPasswordResetEmail
+} from 'firebase/auth'
+
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
+}
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig)
+const auth = getAuth(app)
+
+// Configure providers
+const googleProvider = new GoogleAuthProvider()
+googleProvider.setCustomParameters({
+  prompt: 'select_account'
+})
+
+const microsoftProvider = new OAuthProvider('microsoft.com')
+microsoftProvider.setCustomParameters({
+  prompt: 'select_account'
+})
+
+export {
+  auth,
+  googleProvider,
+  microsoftProvider,
+  signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
+  sendPasswordResetEmail
+}
+
+
+### NEW FILE: Vue-Frontend/src/components/features/landing/LoginForm.vue
+<template>
+  <div class="bg-white p-8 rounded-2xl shadow-lg">
+    <h2 class="text-2xl font-bold text-gray-900 mb-6">Login</h2>
+    
+    <!-- OAuth Buttons -->
+    <div class="space-y-3 mb-6">
+      <button
+        @click="handleGoogleLogin"
+        :disabled="isLoading"
+        class="w-full flex items-center justify-center gap-3 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <svg class="w-5 h-5" viewBox="0 0 24 24">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+        </svg>
+        <span class="text-gray-700 font-medium">Continue with Google</span>
+      </button>
+
+      <button
+        @click="handleMicrosoftLogin"
+        :disabled="isLoading"
+        class="w-full flex items-center justify-center gap-3 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <svg class="w-5 h-5" viewBox="0 0 23 23">
+          <path fill="#f3f3f3" d="M0 0h23v23H0z"/>
+          <path fill="#f35325" d="M1 1h10v10H1z"/>
+          <path fill="#81bc06" d="M12 1h10v10H12z"/>
+          <path fill="#05a6f0" d="M1 12h10v10H1z"/>
+          <path fill="#ffba08" d="M12 12h10v10H12z"/>
+        </svg>
+        <span class="text-gray-700 font-medium">Continue with Microsoft</span>
+      </button>
+    </div>
+
+    <div class="relative mb-6">
+      <div class="absolute inset-0 flex items-center">
+        <div class="w-full border-t border-gray-300"></div>
+      </div>
+      <div class="relative flex justify-center text-sm">
+        <span class="px-2 bg-white text-gray-500">Or continue with email</span>
+      </div>
+    </div>
+    
+    <!-- Email/Password Form -->
+    <form @submit.prevent="handleEmailLogin" class="space-y-4">
+      <div>
+        <label for="email" class="block text-sm font-medium text-gray-700 mb-1">
+          Email
+        </label>
+        <input
+          id="email"
+          v-model="form.email"
+          type="email"
+          required
+          class="input-field"
+          placeholder="Enter your email"
+        />
+      </div>
+
+      <div>
+        <label for="password" class="block text-sm font-medium text-gray-700 mb-1">
+          Password
+        </label>
+        <input
+          id="password"
+          v-model="form.password"
+          type="password"
+          required
+          class="input-field"
+          placeholder="Enter your password"
+        />
+      </div>
+
+      <div v-if="error" class="text-red-600 text-sm">
+        {{ error }}
+      </div>
+
+      <button 
+        type="submit" 
+        :disabled="isLoading"
+        class="w-full btn-primary"
+      >
+        <span v-if="isLoading">Logging in...</span>
+        <span v-else>Login</span>
+      </button>
+    </form>
+
+    <div class="mt-6 text-center space-y-2">
+      <button 
+        @click="handleForgotPassword"
+        class="text-primary-600 hover:text-primary-700 text-sm"
+      >
+        Forgot password?
+      </button>
+      <br>
+      <button 
+        @click="$emit('switch-to-register')"
+        class="text-primary-600 hover:text-primary-700 font-medium"
+      >
+        Don't have an account? Register
+      </button>
+      <br>
+      <button 
+        @click="$emit('cancel')"
+        class="text-gray-600 hover:text-gray-700"
+      >
+        Back
+      </button>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+import { 
+  auth, 
+  googleProvider, 
+  microsoftProvider, 
+  signInWithPopup,
+  signInWithEmailAndPassword,
+  sendPasswordResetEmail
+} from '@/config/firebase'
+
+const emit = defineEmits(['success', 'switch-to-register', 'cancel'])
+
+const authStore = useAuthStore()
+const form = ref({
+  email: '',
+  password: ''
+})
+const error = ref('')
+const isLoading = ref(false)
+
+// Email/Password Login
+const handleEmailLogin = async () => {
+  isLoading.value = true
+  error.value = ''
+  
+  try {
+    // Firebase authenticates
+    const userCredential = await signInWithEmailAndPassword(
+      auth,
+      form.value.email,
+      form.value.password
+    )
+    
+    // Get Firebase ID token
+    const idToken = await userCredential.user.getIdToken()
+    
+    // Send to backend (no username/full_name needed - existing user)
+    const result = await authStore.firebaseLogin(idToken)
+    
+    if (result.success) {
+      emit('success')
+    } else {
+      error.value = result.message
+    }
+  } catch (err) {
+    console.error('Login error:', err)
+    if (err.code === 'auth/user-not-found') {
+      error.value = 'No account found with this email'
+    } else if (err.code === 'auth/wrong-password') {
+      error.value = 'Incorrect password'
+    } else if (err.code === 'auth/too-many-requests') {
+      error.value = 'Too many failed attempts. Try again later.'
+    } else if (err.code === 'auth/invalid-credential') {
+      error.value = 'Invalid email or password'
+    } else {
+      error.value = err.message || 'Login failed'
+    }
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// Google OAuth
+const handleGoogleLogin = async () => {
+  isLoading.value = true
+  error.value = ''
+  
+  try {
+    const result = await signInWithPopup(auth, googleProvider)
+    const idToken = await result.user.getIdToken()
+    
+    const loginResult = await authStore.firebaseLogin(idToken)
+    
+    if (loginResult.success) {
+      emit('success')
+    } else {
+      error.value = loginResult.message
+    }
+  } catch (err) {
+    console.error('Google login error:', err)
+    if (err.code === 'auth/popup-closed-by-user') {
+      error.value = 'Sign-in cancelled'
+    } else {
+      error.value = err.message || 'Google login failed'
+    }
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// Microsoft OAuth
+const handleMicrosoftLogin = async () => {
+  isLoading.value = true
+  error.value = ''
+  
+  try {
+    const result = await signInWithPopup(auth, microsoftProvider)
+    const idToken = await result.user.getIdToken()
+    
+    const loginResult = await authStore.firebaseLogin(idToken)
+    
+    if (loginResult.success) {
+      emit('success')
+    } else {
+      error.value = loginResult.message
+    }
+  } catch (err) {
+    console.error('Microsoft login error:', err)
+    if (err.code === 'auth/popup-closed-by-user') {
+      error.value = 'Sign-in cancelled'
+    } else {
+      error.value = err.message || 'Microsoft login failed'
+    }
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// Password Reset
+const handleForgotPassword = async () => {
+  const email = prompt('Enter your email address:')
+  if (!email) return
+  
+  try {
+    await sendPasswordResetEmail(auth, email)
+    alert('Password reset email sent! Check your inbox.')
+  } catch (err) {
+    alert('Error: ' + (err.message || 'Could not send reset email'))
+  }
+}
+</script>
+
+
+### MODIFIED FILE: Vue-Frontend/src/components/features/landing/RegisterForm.vue
+<template>
+  <div class="bg-white p-8 rounded-2xl shadow-lg">
+    <h2 class="text-2xl font-bold text-gray-900 mb-6">Create Account</h2>
+    
+    <!-- OAuth Buttons -->
+    <div class="space-y-3 mb-6">
+      <button
+        @click="handleGoogleSignup"
+        :disabled="isLoading"
+        class="w-full flex items-center justify-center gap-3 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <svg class="w-5 h-5" viewBox="0 0 24 24">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+        </svg>
+        <span class="text-gray-700 font-medium">Continue with Google</span>
+      </button>
+
+      <button
+        @click="handleMicrosoftSignup"
+        :disabled="isLoading"
+        class="w-full flex items-center justify-center gap-3 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <svg class="w-5 h-5" viewBox="0 0 23 23">
+          <path fill="#f3f3f3" d="M0 0h23v23H0z"/>
+          <path fill="#f35325" d="M1 1h10v10H1z"/>
+          <path fill="#81bc06" d="M12 1h10v10H12z"/>
+          <path fill="#05a6f0" d="M1 12h10v10H1z"/>
+          <path fill="#ffba08" d="M12 12h10v10H12z"/>
+        </svg>
+        <span class="text-gray-700 font-medium">Continue with Microsoft</span>
+      </button>
+    </div>
+
+    <div class="relative mb-6">
+      <div class="absolute inset-0 flex items-center">
+        <div class="w-full border-t border-gray-300"></div>
+      </div>
+      <div class="relative flex justify-center text-sm">
+        <span class="px-2 bg-white text-gray-500">Or continue with email</span>
+      </div>
+    </div>
+    
+    <!-- Email/Password Form -->
+    <form @submit.prevent="handleEmailSubmit" class="space-y-4">
+      <div>
+        <label for="full_name" class="block text-sm font-medium text-gray-700 mb-1">
+          Full Name
+        </label>
+        <input
+          id="full_name"
+          v-model="form.full_name"
+          type="text"
+          required
+          class="input-field"
+          placeholder="Enter your full name"
+        />
+      </div>
+
+      <div>
+        <label for="email" class="block text-sm font-medium text-gray-700 mb-1">
+          Email
+        </label>
+        <input
+          id="email"
+          v-model="form.email"
+          type="email"
+          required
+          class="input-field"
+          placeholder="Enter your email"
+        />
+      </div>
+
+      <div>
+        <label for="username" class="block text-sm font-medium text-gray-700 mb-1">
+          Username
+        </label>
+        <input
+          id="username"
+          v-model="form.username"
+          type="text"
+          required
+          class="input-field"
+          placeholder="Choose a username"
+        />
+      </div>
+
+      <div>
+        <label for="password" class="block text-sm font-medium text-gray-700 mb-1">
+          Password
+        </label>
+        <input
+          id="password"
+          v-model="form.password"
+          type="password"
+          required
+          minlength="6"
+          class="input-field"
+          placeholder="Create a password (min 6 characters)"
+        />
+      </div>
+
+      <div v-if="error" class="text-red-600 text-sm">
+        {{ error }}
+      </div>
+
+      <div v-if="successMessage" class="text-green-600 text-sm">
+        {{ successMessage }}
+      </div>
+
+      <button 
+        type="submit" 
+        :disabled="isLoading"
+        class="w-full btn-primary"
+      >
+        <span v-if="isLoading">Creating account...</span>
+        <span v-else>Register with Email</span>
+      </button>
+    </form>
+
+    <div class="mt-6 text-center space-y-2">
+      <button 
+        @click="$emit('switch-to-login')"
+        class="text-primary-600 hover:text-primary-700 font-medium"
+      >
+        Already have an account? Login
+      </button>
+      <br>
+      <button 
+        @click="$emit('cancel')"
+        class="text-gray-600 hover:text-gray-700"
+      >
+        Back
+      </button>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+import { 
+  auth, 
+  googleProvider, 
+  microsoftProvider, 
+  signInWithPopup,
+  createUserWithEmailAndPassword,
+  sendEmailVerification
+} from '@/config/firebase'
+
+const emit = defineEmits(['success', 'switch-to-login', 'cancel'])
+
+const authStore = useAuthStore()
+const form = ref({
+  full_name: '',
+  email: '',
+  username: '',
+  password: ''
+})
+const error = ref('')
+const successMessage = ref('')
+const isLoading = ref(false)
+
+// Email/Password Registration
+const handleEmailSubmit = async () => {
+  isLoading.value = true
+  error.value = ''
+  successMessage.value = ''
+  
+  try {
+    // Step 1: Create Firebase account
+    const userCredential = await createUserWithEmailAndPassword(
+      auth, 
+      form.value.email, 
+      form.value.password
+    )
+    
+    // Step 2: Send verification email
+    await sendEmailVerification(userCredential.user)
+    successMessage.value = 'Verification email sent! Please check your inbox.'
+    
+    // Step 3: Get Firebase ID token
+    const idToken = await userCredential.user.getIdToken()
+    
+    // Step 4: Send to backend with username and full_name
+    const result = await authStore.firebaseLogin({
+      idToken: idToken,
+      username: form.value.username,
+      full_name: form.value.full_name
+    })
+    
+    if (result.success) {
+      emit('success')
+    } else {
+      error.value = result.message
+    }
+  } catch (err) {
+    console.error('Registration error:', err)
+    if (err.code === 'auth/email-already-in-use') {
+      error.value = 'Email already registered. Please login instead.'
+    } else if (err.code === 'auth/weak-password') {
+      error.value = 'Password is too weak. Use at least 6 characters.'
+    } else if (err.code === 'auth/invalid-email') {
+      error.value = 'Invalid email address'
+    } else {
+      error.value = err.message || 'Registration failed'
+    }
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// Google OAuth
+const handleGoogleSignup = async () => {
+  isLoading.value = true
+  error.value = ''
+  
+  try {
+    const result = await signInWithPopup(auth, googleProvider)
+    const idToken = await result.user.getIdToken()
+    
+    // Send to backend (no username/full_name - auto-generated)
+    const loginResult = await authStore.firebaseLogin(idToken)
+    
+    if (loginResult.success) {
+      emit('success')
+    } else {
+      error.value = loginResult.message
+    }
+  } catch (err) {
+    console.error('Google signup error:', err)
+    if (err.code === 'auth/popup-closed-by-user') {
+      error.value = 'Sign-up cancelled'
+    } else if (err.code === 'auth/account-exists-with-different-credential') {
+      error.value = 'An account already exists with this email using a different sign-in method'
+    } else {
+      error.value = err.message || 'Google signup failed'
+    }
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// Microsoft OAuth
+const handleMicrosoftSignup = async () => {
+  isLoading.value = true
+  error.value = ''
+  
+  try {
+    const result = await signInWithPopup(auth, microsoftProvider)
+    const idToken = await result.user.getIdToken()
+    
+    // Send to backend (no username/full_name - auto-generated)
+    const loginResult = await authStore.firebaseLogin(idToken)
+    
+    if (loginResult.success) {
+      emit('success')
+    } else {
+      error.value = loginResult.message
+    }
+  } catch (err) {
+    console.error('Microsoft signup error:', err)
+    if (err.code === 'auth/popup-closed-by-user') {
+      error.value = 'Sign-up cancelled'
+    } else if (err.code === 'auth/account-exists-with-different-credential') {
+      error.value = 'An account already exists with this email using a different sign-in method'
+    } else {
+      error.value = err.message || 'Microsoft signup failed'
+    }
+  } finally {
+    isLoading.value = false
+  }
+}
+</script>
+
+
+### MODIFIED FILE: Vue-Frontend/src/stores/auth.js
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+import { authService } from '@/services/auth/authService'
+
+export const useAuthStore = defineStore('auth', () => {
+  const user = ref(null)
+  const token = ref(localStorage.getItem('token') || null)
+  const isLoading = ref(false)
+
+  const isAuthenticated = computed(() => !!token.value && !!user.value)
+
+  const login = async (credentials) => {
+    isLoading.value = true
+    try {
+      const response = await authService.login(credentials)
+      token.value = response.data.access_token
+      user.value = response.data.user
+      localStorage.setItem('token', token.value)
+      return { success: true }
+    } catch (error) {
+      return { success: false, message: error.response?.data?.message || 'Login failed' }
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  const register = async (userData) => {
+    isLoading.value = true
+    try {
+      console.log('Register: Creating account...') // DEBUG
+      
+      // First, create the account
+      const registerResponse = await authService.register(userData)
+      console.log('Register: Account created:', registerResponse.data) // DEBUG
+      
+      // Registration successful, now login to get token
+      console.log('Register: Logging in...') // DEBUG
+      const loginResponse = await authService.login({
+        email: userData.email,
+        password: userData.password
+      })
+      console.log('Register: Login response:', loginResponse.data) // DEBUG
+      
+      // Store token and user data
+      token.value = loginResponse.data.access_token
+      user.value = loginResponse.data.user || registerResponse.data
+      localStorage.setItem('token', token.value)
+      
+      console.log('Register: Success! Token:', token.value) // DEBUG
+      console.log('Register: User:', user.value) // DEBUG
+      
+      return { success: true }
+    } catch (error) {
+      console.error('Register: Error occurred:', error) // DEBUG
+      console.error('Register: Error response:', error.response) // DEBUG
+      return { 
+        success: false, 
+        message: error.response?.data?.detail || error.response?.data?.message || 'Registration failed' 
+      }
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  // NEW: Firebase authentication
+  const firebaseLogin = async (data) => {
+    isLoading.value = true
+    try {
+      // data can be just idToken string OR { idToken, username, full_name }
+      const payload = typeof data === 'string' 
+        ? { id_token: data }
+        : { 
+            id_token: data.idToken,
+            username: data.username,
+            full_name: data.full_name
+          }
+      
+      const response = await authService.firebaseLogin(payload)
+      token.value = response.data.access_token
+      user.value = response.data.user
+      localStorage.setItem('token', token.value)
+      return { success: true }
+    } catch (error) {
+      return { 
+        success: false, 
+        message: error.response?.data?.detail || 'Firebase login failed' 
+      }
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  const logout = () => {
+    user.value = null
+    token.value = null
+    localStorage.removeItem('token')
+  }
+
+  const initializeAuth = async () => {
+    if (token.value) {
+      try {
+        const response = await authService.getCurrentUser()
+        user.value = response.data
+      } catch (error) {
+        logout()
+      }
+    }
+  }
+
+  return {
+    user,
+    token,
+    isLoading,
+    isAuthenticated,
+    login,
+    register,
+    firebaseLogin,  // NEW
+    logout,
+    initializeAuth
+  }
+})
+
+
+### MODIFIED FILE: Vue-Frontend/src/services/auth/authService.js
+import api from '../api'
+
+export const authService = {
+  async login(credentials) {
+    return api.post('/auth/login', {
+      username: credentials.email,
+      password: credentials.password
+    })
+  },
+
+  async register(userData) {
+    return api.post('/auth/register', userData)
+  },
+
+  // NEW: Firebase login
+  async firebaseLogin(payload) {
+    return api.post('/auth/firebase-login', payload)
+  },
+
+  async getCurrentUser() {
+    return api.get('/auth/me')
+  },
+
+  async updateProfile(userData) {
+    return api.put('/auth/profile', userData)
+  },
+
+  async logout() {
+    return api.post('/auth/logout')
+  }
+}
+
+
+### MODIFIED FILE: Vue-Frontend/package.json
+{
+  "name": "studhelper-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.3.4",
+    "vue-router": "^4.2.5",
+    "pinia": "^2.1.7",
+    "axios": "^1.6.2",
+    "firebase": "^10.7.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.4.0",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.3.6",
+    "vite": "^5.0.0"
+  }
+}
+
+
+### MODIFIED FILE: Vue-Frontend/.env.example
+# API Configuration
+VITE_API_BASE_URL=http://localhost:8000
+
+# Firebase Configuration
+VITE_FIREBASE_API_KEY=your-api-key-here
+VITE_FIREBASE_AUTH_DOMAIN=your-project-id.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your-project-id
+VITE_FIREBASE_STORAGE_BUCKET=your-project-id.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=your-sender-id
+VITE_FIREBASE_APP_ID=your-app-id
+
+
+# ============================================================================
+# SETUP INSTRUCTIONS
+# ============================================================================
+
+### NEW FILE: README_FIREBASE.md
+### FIREBASE SETUP INSTRUCTIONS
+
+## Backend Setup:
+
+1. Install new dependency:
+   ```bash
+   cd Backend
+   pip install firebase-admin==6.5.0
+   ```
+
+2. Update .env file with Firebase credentials:
+   ```
+   FIREBASE_PROJECT_ID=your-firebase-project-id
+   FIREBASE_CREDENTIALS_PATH=./firebase-credentials.json
+   ```
+
+3. Download Firebase service account JSON:
+   - Go to Firebase Console > Project Settings > Service Accounts
+   - Click "Generate new private key"
+   - Save as firebase-credentials.json in Backend folder
+
+4. Run database migration:
+   ```bash
+   alembic upgrade head
+   ```
+
+5. Start backend:
+   ```bash
+   uvicorn app.main:app --reload
+   ```
+
+
+## Frontend Setup:
+
+1. Install new dependency:
+   ```bash
+   cd Vue-Frontend
+   npm install firebase
+   ```
+
+2. Update .env file with Firebase web config:
+   ```
+   VITE_FIREBASE_API_KEY=AIza...
+   VITE_FIREBASE_AUTH_DOMAIN=studhelper-xxxxx.firebaseapp.com
+   VITE_FIREBASE_PROJECT_ID=studhelper-xxxxx
+   VITE_FIREBASE_STORAGE_BUCKET=studhelper-xxxxx.appspot.com
+   VITE_FIREBASE_MESSAGING_SENDER_ID=123456789
+   VITE_FIREBASE_APP_ID=1:123456789:web:abcdef
+   ```
+
+3. Start frontend:
+   ```bash
+   npm run dev
+   ```
+
+
+## Firebase Console Setup:
+
+1. Create Firebase project at https://console.firebase.google.com/
+
+2. Enable Authentication:
+   - Go to Build > Authentication
+   - Click "Get started"
+   - Enable "Email/Password" provider
+   - Enable "Google" provider
+   - Enable "Microsoft" provider (requires Azure AD setup)
+
+3. Get Web Config:
+   - Go to Project Settings > General
+   - Scroll to "Your apps"
+   - Click web icon (</>)
+   - Register app and copy firebaseConfig values to .env
+
+4. Get Service Account:
+   - Go to Project Settings > Service Accounts
+   - Click "Generate new private key"
+   - Save JSON file as firebase-credentials.json in Backend folder
+
+
+## Testing:
+
+1. Test email/password registration:
+   - Register with email - should create Firebase account
+   - Check email for verification link
+   - Login with same credentials
+
+2. Test Google OAuth:
+   - Click "Continue with Google"
+   - Select Google account
+   - Should auto-login
+
+3. Test Microsoft OAuth:
+   - Click "Continue with Microsoft"
+   - Enter Microsoft credentials
+   - Should auto-login
+
+
+## Important Notes:
+
+- Firebase API keys in frontend are MEANT to be public
+- Security comes from Firebase Auth rules and backend JWT verification
+- All passwords are handled by Firebase (never stored in your DB)
+- OAuth users have no password in your database
+- Email verification is handled automatically by Firebase
+- Password reset is handled by Firebase (sendPasswordResetEmail)

@@ -1,73 +1,59 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
-import logging
-from contextlib import asynccontextmanager
-
-from app.database import create_tables
-from app.routes import auth, classes, permissions, chat, documents, usage
+from app.routes import auth
+from app.firebase_admin import initialize_firebase
 from app.config import get_settings
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("logs/app.log"),
-        logging.StreamHandler()
-    ]
-)
-
-logger = logging.getLogger(__name__)
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    logger.info("Starting StudHelper Backend...")
-    create_tables()
-    logger.info("Database tables created successfully")
-    yield
-    # Shutdown
-    logger.info("Shutting down StudHelper Backend...")
-
 app = FastAPI(
-    title="StudHelper Backend",
-    description="AI-powered class-based learning platform with flexible permissions",
-    version="1.0.0",
-    lifespan=lifespan
+    title="StudHelper API",
+    description="AI-powered study assistant with class-based learning",
+    version="1.0.0"
 )
 
-# Security middleware
-app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
-
-# CORS middleware
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=["http://localhost:5173"],  # Frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Include routers
-app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
-app.include_router(classes.router, prefix="/api/v1/classes", tags=["Classes"])
-app.include_router(permissions.router, prefix="/api/v1/classes", tags=["Permissions"])
-app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
-app.include_router(documents.router, prefix="/api/v1/documents", tags=["Documents"])
-app.include_router(usage.router, prefix="/api/v1/usage", tags=["Usage"])
+app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["Authentication"])
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services on startup"""
+    logger.info("Starting StudHelper API...")
+    
+    # Initialize Firebase Admin SDK
+    try:
+        initialize_firebase()
+        logger.info("Firebase initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize Firebase: {e}")
+        # Don't crash the app, but log the error
+    
+    logger.info("StudHelper API started successfully")
 
 @app.get("/")
 async def root():
     return {
-        "message": "StudHelper Backend API",
+        "message": "StudHelper API",
         "version": "1.0.0",
-        "docs": "/docs"
+        "status": "running"
     }
 
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
 

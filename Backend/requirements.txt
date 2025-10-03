@@ -1,24 +1,14 @@
 fastapi
 uvicorn[standard]
-python-multipart
 sqlalchemy
 psycopg2-binary
-alembic
-pydantic[email]
-pydantic-settings
 python-jose[cryptography]
 passlib[bcrypt]
-PyPDF2
-python-docx
-openai
-tiktoken
-pytz
-numpy
-python-decouple
+python-multipart
+pydantic
+pydantic-settings
+python-dotenv
+alembic
+firebase-admin
 
-# Development and testing
-pytest
-pytest-asyncio
-httpx
 
-pytest-cov

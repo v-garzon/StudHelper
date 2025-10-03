@@ -33,6 +33,8 @@
 
       <!-- Content Area -->
       <main class="flex-1 overflow-hidden">
+        <!-- Verification Banner -->
+        <VerificationBanner />
         <ChatInterface v-if="currentChat" />
         <WelcomeScreen v-else />
       </main>
@@ -49,6 +51,7 @@ import Sidebar from '@/components/features/dashboard/Sidebar.vue'
 import UserMenu from '@/components/features/dashboard/UserMenu.vue'
 import ChatInterface from '@/components/features/dashboard/ChatInterface.vue'
 import WelcomeScreen from '@/components/features/dashboard/WelcomeScreen.vue'
+import VerificationBanner from '@/components/features/dashboard/VerificationBanner.vue'
 
 const uiStore = useUIStore()
 const classStore = useClassStore()

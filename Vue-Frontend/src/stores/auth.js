@@ -62,6 +62,34 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  // NEW: Firebase authentication
+  const firebaseLogin = async (data) => {
+    isLoading.value = true
+    try {
+      // data can be just idToken string OR { idToken, username, full_name }
+      const payload = typeof data === 'string' 
+        ? { id_token: data }
+        : { 
+            id_token: data.idToken,
+            username: data.username,
+            full_name: data.full_name
+          }
+      
+      const response = await authService.firebaseLogin(payload)
+      token.value = response.data.access_token
+      user.value = response.data.user
+      localStorage.setItem('token', token.value)
+      return { success: true }
+    } catch (error) {
+      return { 
+        success: false, 
+        message: error.response?.data?.detail || 'Firebase login failed' 
+      }
+    } finally {
+      isLoading.value = false
+    }
+  }
+
   const logout = () => {
     user.value = null
     token.value = null
@@ -86,8 +114,10 @@ export const useAuthStore = defineStore('auth', () => {
     isAuthenticated,
     login,
     register,
+    firebaseLogin,  // NEW
     logout,
     initializeAuth
   }
 })
+
 
