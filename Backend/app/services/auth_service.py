@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from app.models import User
 from app.schemas import UserCreate, UserUpdate, UserResponse, Token
-from app.utils.security import get_password_hash, verify_password, create_access_token
+from app.utils.security import get_password_hash, verify_password, create_access_token, validate_password_strength
 from app.firebase_admin import verify_firebase_token
 from datetime import timedelta
 from app.config import get_settings
@@ -12,24 +12,32 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 class AuthService:
+    
+    def _get_display_name(self, user: User) -> str:
+        """Get display name: alias if set, otherwise 'Name Surname'"""
+        if user.alias:
+            return user.alias
+        return f"{user.name} {user.surname}"
+    
     async def create_user(self, db: Session, user_data: UserCreate) -> UserResponse:
-        """Create a new user with email/password (legacy method, kept for compatibility)"""
+        """Create a new user with email/password (legacy method)"""
         # Check if email already exists
         existing_user = db.query(User).filter(User.email == user_data.email).first()
         if existing_user:
             raise ValueError("Email already registered")
         
-        # Check if username already exists
-        existing_username = db.query(User).filter(User.username == user_data.username).first()
-        if existing_username:
-            raise ValueError("Username already taken")
+        # Validate password strength
+        password_validation = validate_password_strength(user_data.password)
+        if not password_validation['valid']:
+            raise ValueError(f"Password does not meet requirements: {', '.join(password_validation['errors'])}")
         
         # Create new user
         hashed_password = get_password_hash(user_data.password)
         new_user = User(
             email=user_data.email,
-            username=user_data.username,
-            full_name=user_data.full_name,
+            name=user_data.name,
+            surname=user_data.surname,
+            alias=user_data.alias,
             hashed_password=hashed_password
         )
         
@@ -37,17 +45,16 @@ class AuthService:
         db.commit()
         db.refresh(new_user)
         
-        return UserResponse.model_validate(new_user)
+        user_response = UserResponse.model_validate(new_user)
+        user_response.display_name = self._get_display_name(new_user)
+        return user_response
     
-    async def authenticate_user(self, db: Session, username: str, password: str) -> Token:
+    async def authenticate_user(self, db: Session, email: str, password: str) -> Token:
         """Authenticate user with email/password (legacy method)"""
-        # Check if username is an email or actual username
-        user = db.query(User).filter(
-            (User.username == username) | (User.email == username)
-        ).first()
+        user = db.query(User).filter(User.email == email).first()
         
         if not user:
-            raise ValueError(f"Username or email {username} does not exist")
+            raise ValueError(f"No account found with email {email}")
         if not user.is_active:
             raise ValueError("Account is deactivated")
         if not user.hashed_password:
@@ -55,12 +62,15 @@ class AuthService:
         if not verify_password(password, user.hashed_password):
             raise ValueError("Incorrect password")
         
-        # Create JWT token
+        # Create JWT token with user.id as subject
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
-            data={"sub": user.username}, expires_delta=access_token_expires
+            data={"sub": str(user.id)}, expires_delta=access_token_expires
         )
+        
         user_response = UserResponse.model_validate(user)
+        user_response.display_name = self._get_display_name(user)
+        
         return Token(
             access_token=access_token,
             token_type="bearer",
@@ -68,20 +78,12 @@ class AuthService:
         )
     
     async def firebase_authenticate(self, db: Session, id_token: str, 
-                                    username: Optional[str] = None,
-                                    full_name: Optional[str] = None) -> Token:
+                                    name: Optional[str] = None,
+                                    surname: Optional[str] = None,
+                                    alias: Optional[str] = None) -> Token:
         """
         Authenticate user via Firebase token
         Creates user if first time, returns JWT token
-        
-        Args:
-            db: Database session
-            id_token: Firebase ID token from frontend
-            username: Optional username for email/password registration
-            full_name: Optional full name for email/password registration
-        
-        Returns:
-            Token with JWT and user data
         """
         # Step 1: Verify Firebase token
         try:
@@ -131,22 +133,22 @@ class AuthService:
                 db.refresh(user)
             else:
                 # New user - create account
-                # Use provided username or generate from email
-                if not username:
-                    username = self._generate_username_from_email(email, db)
-                
-                # Use provided full_name or display name from OAuth
-                if not full_name:
-                    full_name = display_name
+                # Use provided name/surname or parse from display_name
+                if not name or not surname:
+                    # Try to split display_name from OAuth
+                    name_parts = display_name.split(' ', 1) if display_name else ['User', 'Name']
+                    name = name or name_parts[0]
+                    surname = surname or (name_parts[1] if len(name_parts) > 1 else 'Unknown')
                 
                 user = User(
                     email=email,
-                    username=username,
-                    full_name=full_name,
+                    name=name,
+                    surname=surname,
+                    alias=alias,
                     firebase_uid=firebase_uid,
                     auth_provider=auth_provider,
                     email_verified=email_verified,
-                    hashed_password=None,  # No password for Firebase users
+                    hashed_password=None,
                     is_active=True
                 )
                 
@@ -156,32 +158,20 @@ class AuthService:
                 
                 logger.info(f"New Firebase user created: {email} via {auth_provider}")
         
-        # Step 3: Create YOUR JWT token
+        # Step 3: Create JWT token with user.id as subject
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
-            data={"sub": user.username}, expires_delta=access_token_expires
+            data={"sub": str(user.id)}, expires_delta=access_token_expires
         )
         
         user_response = UserResponse.model_validate(user)
+        user_response.display_name = self._get_display_name(user)
+        
         return Token(
             access_token=access_token,
             token_type="bearer",
             user=user_response
         )
-    
-    def _generate_username_from_email(self, email: str, db: Session) -> str:
-        """Generate unique username from email"""
-        base_username = email.split('@')[0].lower()
-        # Remove special characters
-        base_username = ''.join(c for c in base_username if c.isalnum() or c == '_')
-        username = base_username
-        counter = 1
-        
-        while db.query(User).filter(User.username == username).first():
-            username = f"{base_username}{counter}"
-            counter += 1
-        
-        return username
     
     async def update_user(self, db: Session, user_id: int, user_update: UserUpdate) -> UserResponse:
         """Update user profile"""
@@ -207,7 +197,9 @@ class AuthService:
         db.commit()
         db.refresh(user)
         
-        return UserResponse.model_validate(user)
+        user_response = UserResponse.model_validate(user)
+        user_response.display_name = self._get_display_name(user)
+        return user_response
     
     async def delete_user(self, db: Session, user_id: int):
         """Delete user account (soft delete)"""

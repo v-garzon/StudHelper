@@ -8,6 +8,12 @@ export const useAuthStore = defineStore('auth', () => {
   const isLoading = ref(false)
 
   const isAuthenticated = computed(() => !!token.value && !!user.value)
+  
+  // Computed property for display name
+  const displayName = computed(() => {
+    if (!user.value) return ''
+    return user.value.display_name || `${user.value.name} ${user.value.surname}`
+  })
 
   const login = async (credentials) => {
     isLoading.value = true
@@ -18,7 +24,7 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.setItem('token', token.value)
       return { success: true }
     } catch (error) {
-      return { success: false, message: error.response?.data?.message || 'Login failed' }
+      return { success: false, message: error.response?.data?.detail || 'Login failed' }
     } finally {
       isLoading.value = false
     }
@@ -62,17 +68,18 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  // NEW: Firebase authentication
+  // Firebase authentication
   const firebaseLogin = async (data) => {
     isLoading.value = true
     try {
-      // data can be just idToken string OR { idToken, username, full_name }
+      // data can be just idToken string OR { idToken, name, surname, alias }
       const payload = typeof data === 'string' 
         ? { id_token: data }
         : { 
             id_token: data.idToken,
-            username: data.username,
-            full_name: data.full_name
+            name: data.name,
+            surname: data.surname,
+            alias: data.alias
           }
       
       const response = await authService.firebaseLogin(payload)
@@ -112,9 +119,10 @@ export const useAuthStore = defineStore('auth', () => {
     token,
     isLoading,
     isAuthenticated,
+    displayName,  // NEW
     login,
     register,
-    firebaseLogin,  // NEW
+    firebaseLogin,
     logout,
     initializeAuth
   }

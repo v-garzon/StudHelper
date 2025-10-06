@@ -1,0 +1,1488 @@
+# StudHelper - User Model Refactor
+# Remove username/full_name, add name/surname/alias
+# Change JWT to use user.id instead of username
+# Login only with email
+
+# ============================================================================
+# BACKEND FILES
+# ============================================================================
+
+### NEW FILE: Backend/migrations/versions/refactor_user_model.py
+"""Refactor user model - remove username/full_name, add name/surname/alias
+
+Revision ID: refactor_user_model
+Revises: add_firebase_auth
+Create Date: 2025-01-15
+
+"""
+from alembic import op
+import sqlalchemy as sa
+
+# revision identifiers, used by Alembic.
+revision = 'refactor_user_model'
+down_revision = 'add_firebase_auth'  # Replace with your actual previous revision
+branch_labels = None
+depends_on = None
+
+def upgrade():
+    # Add new columns
+    op.add_column('users', sa.Column('name', sa.String(), nullable=True))  # Nullable first for existing data
+    op.add_column('users', sa.Column('surname', sa.String(), nullable=True))  # Nullable first for existing data
+    op.add_column('users', sa.Column('alias', sa.String(), nullable=True))
+    
+    # Remove old columns (drop indexes first)
+    op.drop_index('ix_users_username', table_name='users')
+    op.drop_column('users', 'username')
+    op.drop_column('users', 'full_name')
+    
+    # Make name and surname NOT NULL (since you deleted all users, this is safe)
+    op.alter_column('users', 'name', nullable=False)
+    op.alter_column('users', 'surname', nullable=False)
+
+def downgrade():
+    # Add back old columns
+    op.add_column('users', sa.Column('username', sa.String(), nullable=False))
+    op.add_column('users', sa.Column('full_name', sa.String(), nullable=True))
+    
+    # Remove new columns
+    op.drop_column('users', 'alias')
+    op.drop_column('users', 'surname')
+    op.drop_column('users', 'name')
+    
+    # Recreate username index
+    op.create_index('ix_users_username', 'users', ['username'], unique=True)
+
+
+### MODIFIED FILE: Backend/app/models/__init__.py
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Float, Boolean, Date, UniqueConstraint
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import relationship
+from datetime import datetime, date
+import enum
+from sqlalchemy import Enum
+
+Base = declarative_base()
+
+class ProcessingStatus(enum.Enum):
+    PENDING = "pending"
+    PROCESSING = "processing" 
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+class DocumentScope(enum.Enum):
+    CLASS = "class"    # Available to all chats in the class
+    CHAT = "chat"      # Only available to specific chat session
+
+class User(Base):
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    
+    # NEW: Name fields replacing username/full_name
+    name = Column(String, nullable=False)
+    surname = Column(String, nullable=False)
+    alias = Column(String, nullable=True)  # Optional display name
+    
+    hashed_password = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+    
+    # Firebase authentication fields
+    firebase_uid = Column(String, unique=True, nullable=True, index=True)
+    auth_provider = Column(String, default='email')
+    email_verified = Column(Boolean, default=False)
+    
+    # Relationships
+    owned_classes = relationship("Class", back_populates="owner")
+    class_memberships = relationship("ClassMembership", back_populates="user")
+    chat_sessions = relationship("ChatSession", back_populates="user")
+    usage_records = relationship("UsageRecord", back_populates="user", foreign_keys="UsageRecord.user_id")
+
+class Class(Base):
+    __tablename__ = "classes"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    description = Column(Text)
+    class_code = Column(String, unique=True, index=True, nullable=False)
+    owner_id = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    owner = relationship("User", back_populates="owned_classes")
+    memberships = relationship("ClassMembership", back_populates="class_obj")
+    documents = relationship("Document", back_populates="class_obj")
+    chat_sessions = relationship("ChatSession", back_populates="class_obj")
+
+class ClassMembership(Base):
+    """Class membership with granular permissions"""
+    __tablename__ = "class_memberships"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    class_id = Column(Integer, ForeignKey("classes.id"))
+    joined_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Permission flags
+    is_manager = Column(Boolean, default=False)
+    can_read = Column(Boolean, default=True)
+    can_chat = Column(Boolean, default=True)
+    max_concurrent_chats = Column(Integer, default=3)
+    can_share_class = Column(Boolean, default=False)
+    can_upload_documents = Column(Boolean, default=True)
+    
+    # Billing and limits
+    is_sponsored = Column(Boolean, default=False)
+    daily_token_limit = Column(Integer, default=1_000_000)
+    weekly_token_limit = Column(Integer, default=5_000_000)
+    monthly_token_limit = Column(Integer, default=15_000_000)
+    
+    # Relationships
+    user = relationship("User", back_populates="class_memberships")
+    class_obj = relationship("Class", back_populates="memberships")
+    
+    __table_args__ = (
+        UniqueConstraint('user_id', 'class_id', name='_user_class_membership_uc'),
+    )
+
+class ClassUsageTracker(Base):
+    """Per-class, per-user usage tracking"""
+    __tablename__ = "class_usage_trackers"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    class_id = Column(Integer, ForeignKey("classes.id"))
+    
+    # Current usage counters
+    daily_tokens_used = Column(Integer, default=0)
+    weekly_tokens_used = Column(Integer, default=0)
+    monthly_tokens_used = Column(Integer, default=0)
+    
+    # Reset tracking (Madrid timezone)
+    last_daily_reset = Column(Date, default=date.today)
+    last_weekly_reset = Column(Date, default=date.today)
+    last_monthly_reset = Column(Date, default=date.today)
+    
+    __table_args__ = (
+        UniqueConstraint('user_id', 'class_id', name='_user_class_usage_uc'),
+    )
+
+class Document(Base):
+    __tablename__ = "documents"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    filename = Column(String, nullable=False)
+    original_filename = Column(String, nullable=False)
+    file_path = Column(String, nullable=False)
+    file_type = Column(String, nullable=False)
+    file_size = Column(Integer, nullable=False)
+    
+    # Dual-level document system
+    scope = Column(Enum(DocumentScope), nullable=False)
+    class_id = Column(Integer, ForeignKey("classes.id"))
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True)
+    
+    uploaded_by = Column(Integer, ForeignKey("users.id"))
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    processing_status = Column(Enum(ProcessingStatus), default=ProcessingStatus.PENDING)
+    processing_error = Column(Text, nullable=True)
+    
+    # Relationships
+    class_obj = relationship("Class", back_populates="documents")
+    session = relationship("ChatSession", back_populates="documents")
+    chunks = relationship("DocumentChunk", back_populates="document")
+
+class DocumentChunk(Base):
+    __tablename__ = "document_chunks"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id"))
+    content = Column(Text, nullable=False)
+    chunk_index = Column(Integer, nullable=False)
+    char_start = Column(Integer, nullable=False)
+    char_end = Column(Integer, nullable=False)
+    vector_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    document = relationship("Document", back_populates="chunks")
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    class_id = Column(Integer, ForeignKey("classes.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_active = Column(Boolean, default=True)
+    
+    # Relationships
+    user = relationship("User", back_populates="chat_sessions")
+    class_obj = relationship("Class", back_populates="chat_sessions")
+    documents = relationship("Document", back_populates="session")
+    messages = relationship("ChatMessage", back_populates="session")
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"))
+    content = Column(Text, nullable=False)
+    is_user = Column(Boolean, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    response_time_ms = Column(Integer, nullable=True)
+    context_used = Column(Text, nullable=True)
+    tokens_used = Column(Integer, default=0)
+    
+    # Relationships
+    session = relationship("ChatSession", back_populates="messages")
+
+class UsageRecord(Base):
+    __tablename__ = "usage_records"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    model_name = Column(String, nullable=False)
+    operation_type = Column(String, nullable=False)
+    input_tokens = Column(Integer, default=0)
+    output_tokens = Column(Integer, default=0)
+    cost = Column(Float, nullable=False)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    session_id = Column(Integer, ForeignKey("chat_sessions.id"), nullable=True)
+    
+    # Billing attribution
+    billed_to_user_id = Column(Integer, ForeignKey("users.id"))
+    is_sponsored = Column(Boolean, default=False)
+    is_overflow = Column(Boolean, default=False)
+    
+    # Relationships
+    user = relationship("User", back_populates="usage_records", foreign_keys=[user_id])
+
+
+### MODIFIED FILE: Backend/app/schemas/__init__.py
+from pydantic import BaseModel, EmailStr, field_validator
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+from app.models import ProcessingStatus, DocumentScope
+
+# User schemas
+class UserBase(BaseModel):
+    email: EmailStr
+    name: str
+    surname: str
+    alias: Optional[str] = None
+
+class UserCreate(UserBase):
+    password: str
+
+class UserUpdate(BaseModel):
+    email: Optional[EmailStr] = None
+    name: Optional[str] = None
+    surname: Optional[str] = None
+    alias: Optional[str] = None
+
+class UserResponse(UserBase):
+    id: int
+    created_at: datetime
+    is_active: bool
+    auth_provider: str
+    email_verified: bool
+    display_name: Optional[str] = None  # Computed field: alias or "Name Surname"
+    
+    class Config:
+        from_attributes = True
+
+# Auth schemas
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+    user: UserResponse
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+class FirebaseLoginRequest(BaseModel):
+    id_token: str
+    name: Optional[str] = None
+    surname: Optional[str] = None
+    alias: Optional[str] = None
+
+# Class schemas
+class ClassBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+class ClassCreate(ClassBase):
+    pass
+
+class ClassResponse(ClassBase):
+    id: int
+    class_code: str
+    owner_id: int
+    created_at: datetime
+    is_active: bool
+    member_count: Optional[int] = 0
+    
+    class Config:
+        from_attributes = True
+
+class JoinClassRequest(BaseModel):
+    class_code: str
+
+# Permission schemas
+class PermissionUpdate(BaseModel):
+    can_read: Optional[bool] = None
+    can_chat: Optional[bool] = None
+    max_concurrent_chats: Optional[int] = None
+    can_share_class: Optional[bool] = None
+    can_upload_documents: Optional[bool] = None
+    daily_token_limit: Optional[int] = None
+    weekly_token_limit: Optional[int] = None
+    monthly_token_limit: Optional[int] = None
+
+class MembershipResponse(BaseModel):
+    id: int
+    user_id: int
+    user_display_name: str  # Changed from username
+    joined_at: datetime
+    is_manager: bool
+    can_read: bool
+    can_chat: bool
+    max_concurrent_chats: int
+    can_share_class: bool
+    can_upload_documents: bool
+    is_sponsored: bool
+    daily_token_limit: int
+    weekly_token_limit: int
+    monthly_token_limit: int
+    
+    class Config:
+        from_attributes = True
+
+class SponsorshipUpdate(BaseModel):
+    is_sponsored: bool
+
+# Document schemas
+class DocumentResponse(BaseModel):
+    id: int
+    filename: str
+    original_filename: str
+    file_type: str
+    file_size: int
+    scope: DocumentScope
+    class_id: int
+    session_id: Optional[int]
+    uploaded_by: int
+    uploaded_at: datetime
+    processing_status: ProcessingStatus
+    processing_error: Optional[str]
+    
+    class Config:
+        from_attributes = True
+
+# Chat schemas
+class ChatSessionCreate(BaseModel):
+    title: str
+    class_id: int
+
+class ChatSessionResponse(BaseModel):
+    id: int
+    title: str
+    user_id: int
+    class_id: int
+    created_at: datetime
+    updated_at: datetime
+    is_active: bool
+    message_count: Optional[int] = 0
+    
+    class Config:
+        from_attributes = True
+
+class MessageCreate(BaseModel):
+    content: str
+
+class MessageResponse(BaseModel):
+    id: int
+    session_id: int
+    content: str
+    is_user: bool
+    timestamp: datetime
+    response_time_ms: Optional[int]
+    context_used: Optional[str]
+    tokens_used: int
+    
+    class Config:
+        from_attributes = True
+
+class ChatResponse(BaseModel):
+    user_message: MessageResponse
+    ai_response: MessageResponse
+    cost: float
+    response_time_ms: int
+    context_provided: bool
+
+# Usage schemas
+class UsageStats(BaseModel):
+    daily_tokens_used: int
+    weekly_tokens_used: int
+    monthly_tokens_used: int
+    daily_limit: int
+    weekly_limit: int
+    monthly_limit: int
+    daily_remaining: int
+    weekly_remaining: int
+    monthly_remaining: int
+
+class ClassUsageOverview(BaseModel):
+    user_id: int
+    user_display_name: str  # Changed from username
+    usage_stats: UsageStats
+    is_sponsored: bool
+    last_activity: Optional[datetime]
+
+class UsageRecord(BaseModel):
+    id: int
+    model_name: str
+    operation_type: str
+    input_tokens: int
+    output_tokens: int
+    cost: float
+    timestamp: datetime
+    is_sponsored: bool
+    is_overflow: bool
+
+
+### MODIFIED FILE: Backend/app/services/auth_service.py
+from sqlalchemy.orm import Session
+from app.models import User
+from app.schemas import UserCreate, UserUpdate, UserResponse, Token
+from app.utils.security import get_password_hash, verify_password, create_access_token
+from app.firebase_admin import verify_firebase_token
+from datetime import timedelta
+from app.config import get_settings
+from typing import Optional
+import logging
+
+settings = get_settings()
+logger = logging.getLogger(__name__)
+
+class AuthService:
+    
+    def _get_display_name(self, user: User) -> str:
+        """Get display name: alias if set, otherwise 'Name Surname'"""
+        if user.alias:
+            return user.alias
+        return f"{user.name} {user.surname}"
+    
+    async def create_user(self, db: Session, user_data: UserCreate) -> UserResponse:
+        """Create a new user with email/password (legacy method)"""
+        # Check if email already exists
+        existing_user = db.query(User).filter(User.email == user_data.email).first()
+        if existing_user:
+            raise ValueError("Email already registered")
+        
+        # Create new user
+        hashed_password = get_password_hash(user_data.password)
+        new_user = User(
+            email=user_data.email,
+            name=user_data.name,
+            surname=user_data.surname,
+            alias=user_data.alias,
+            hashed_password=hashed_password
+        )
+        
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        user_response = UserResponse.model_validate(new_user)
+        user_response.display_name = self._get_display_name(new_user)
+        return user_response
+    
+    async def authenticate_user(self, db: Session, email: str, password: str) -> Token:
+        """Authenticate user with email/password (legacy method)"""
+        user = db.query(User).filter(User.email == email).first()
+        
+        if not user:
+            raise ValueError(f"No account found with email {email}")
+        if not user.is_active:
+            raise ValueError("Account is deactivated")
+        if not user.hashed_password:
+            raise ValueError("This account uses social login. Please sign in with Google or Microsoft.")
+        if not verify_password(password, user.hashed_password):
+            raise ValueError("Incorrect password")
+        
+        # Create JWT token with user.id as subject
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": str(user.id)}, expires_delta=access_token_expires
+        )
+        
+        user_response = UserResponse.model_validate(user)
+        user_response.display_name = self._get_display_name(user)
+        
+        return Token(
+            access_token=access_token,
+            token_type="bearer",
+            user=user_response
+        )
+    
+    async def firebase_authenticate(self, db: Session, id_token: str, 
+                                    name: Optional[str] = None,
+                                    surname: Optional[str] = None,
+                                    alias: Optional[str] = None) -> Token:
+        """
+        Authenticate user via Firebase token
+        Creates user if first time, returns JWT token
+        """
+        # Step 1: Verify Firebase token
+        try:
+            decoded_token = verify_firebase_token(id_token)
+        except ValueError as e:
+            raise ValueError(f"Firebase authentication failed: {str(e)}")
+        
+        firebase_uid = decoded_token['uid']
+        email = decoded_token.get('email')
+        email_verified = decoded_token.get('email_verified', False)
+        display_name = decoded_token.get('name', '')
+        
+        # Determine provider
+        provider_data = decoded_token.get('firebase', {}).get('sign_in_provider', 'unknown')
+        if provider_data == 'google.com':
+            auth_provider = 'google'
+        elif provider_data == 'microsoft.com':
+            auth_provider = 'microsoft'
+        elif provider_data == 'password':
+            auth_provider = 'firebase_email'
+        else:
+            auth_provider = 'firebase'
+        
+        if not email:
+            raise ValueError("Email not provided by Firebase")
+        
+        # Step 2: Check if user exists by firebase_uid
+        user = db.query(User).filter(User.firebase_uid == firebase_uid).first()
+        
+        if user:
+            # Existing Firebase user - update verification status
+            user.email_verified = email_verified
+            db.commit()
+            db.refresh(user)
+            logger.info(f"Existing Firebase user logged in: {email}")
+        else:
+            # Check if email already exists (user switching from email/password to OAuth)
+            user = db.query(User).filter(User.email == email).first()
+            
+            if user:
+                # Link existing account to Firebase
+                logger.info(f"Linking existing account to Firebase: {email}")
+                user.firebase_uid = firebase_uid
+                user.auth_provider = auth_provider
+                user.email_verified = email_verified
+                db.commit()
+                db.refresh(user)
+            else:
+                # New user - create account
+                # Use provided name/surname or parse from display_name
+                if not name or not surname:
+                    # Try to split display_name from OAuth
+                    name_parts = display_name.split(' ', 1) if display_name else ['User', 'Name']
+                    name = name or name_parts[0]
+                    surname = surname or (name_parts[1] if len(name_parts) > 1 else 'Unknown')
+                
+                user = User(
+                    email=email,
+                    name=name,
+                    surname=surname,
+                    alias=alias,
+                    firebase_uid=firebase_uid,
+                    auth_provider=auth_provider,
+                    email_verified=email_verified,
+                    hashed_password=None,
+                    is_active=True
+                )
+                
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+                
+                logger.info(f"New Firebase user created: {email} via {auth_provider}")
+        
+        # Step 3: Create JWT token with user.id as subject
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": str(user.id)}, expires_delta=access_token_expires
+        )
+        
+        user_response = UserResponse.model_validate(user)
+        user_response.display_name = self._get_display_name(user)
+        
+        return Token(
+            access_token=access_token,
+            token_type="bearer",
+            user=user_response
+        )
+    
+    async def update_user(self, db: Session, user_id: int, user_update: UserUpdate) -> UserResponse:
+        """Update user profile"""
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise ValueError("User not found")
+        
+        update_data = user_update.model_dump(exclude_unset=True)
+        
+        # Check email uniqueness if email is being updated
+        if "email" in update_data:
+            existing_user = db.query(User).filter(
+                User.email == update_data["email"],
+                User.id != user_id
+            ).first()
+            if existing_user:
+                raise ValueError("Email already taken")
+        
+        # Update user
+        for field, value in update_data.items():
+            setattr(user, field, value)
+        
+        db.commit()
+        db.refresh(user)
+        
+        user_response = UserResponse.model_validate(user)
+        user_response.display_name = self._get_display_name(user)
+        return user_response
+    
+    async def delete_user(self, db: Session, user_id: int):
+        """Delete user account (soft delete)"""
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise ValueError("User not found")
+        
+        # Soft delete by deactivating
+        user.is_active = False
+        db.commit()
+
+
+### MODIFIED FILE: Backend/app/routes/auth.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.orm import Session
+from app.database import get_db
+from app.schemas import UserCreate, UserResponse, UserUpdate, LoginRequest, Token, FirebaseLoginRequest
+from app.services.auth_service import AuthService
+from app.utils.security import get_current_user
+import logging
+
+router = APIRouter()
+security = HTTPBearer()
+logger = logging.getLogger(__name__)
+
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def register(user_data: UserCreate, db: Session = Depends(get_db)):
+    """Register a new user (legacy email/password method)"""
+    try:
+        auth_service = AuthService()
+        user = await auth_service.create_user(db, user_data)
+        logger.info(f"New user registered: {user.email}")
+        return user
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error registering user: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/login", response_model=Token)
+async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
+    """Authenticate user with email/password (legacy method)"""
+    try:
+        auth_service = AuthService()
+        token_data = await auth_service.authenticate_user(db, login_data.email, login_data.password)
+        logger.info(f"User logged in: {login_data.email}")
+        return token_data
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error during login: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/firebase-login", response_model=Token)
+async def firebase_login(request: FirebaseLoginRequest, db: Session = Depends(get_db)):
+    """Authenticate user via Firebase token (primary authentication method)"""
+    try:
+        auth_service = AuthService()
+        token_data = await auth_service.firebase_authenticate(
+            db, 
+            request.id_token,
+            name=request.name,
+            surname=request.surname,
+            alias=request.alias
+        )
+        logger.info(f"Firebase user logged in")
+        return token_data
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error during Firebase login: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.post("/logout")
+async def logout(current_user: UserResponse = Depends(get_current_user)):
+    """Logout user (client should discard token)"""
+    logger.info(f"User logged out: {current_user.email}")
+    return {"message": "Successfully logged out"}
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_profile(current_user: UserResponse = Depends(get_current_user)):
+    """Get current user profile"""
+    return current_user
+
+@router.put("/profile", response_model=UserResponse)
+async def update_profile(
+    user_update: UserUpdate,
+    current_user: UserResponse = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update user profile"""
+    try:
+        auth_service = AuthService()
+        updated_user = await auth_service.update_user(db, current_user.id, user_update)
+        logger.info(f"User profile updated: {current_user.email}")
+        return updated_user
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error updating profile: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.delete("/account")
+async def delete_account(
+    current_user: UserResponse = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete user account"""
+    try:
+        auth_service = AuthService()
+        await auth_service.delete_user(db, current_user.id)
+        logger.info(f"User account deleted: {current_user.email}")
+        return {"message": "Account successfully deleted"}
+    except Exception as e:
+        logger.error(f"Error deleting account: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+### MODIFIED FILE: Backend/app/utils/security.py
+from passlib.context import CryptContext
+from jose import JWTError, jwt
+from fastapi import HTTPException, status, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.orm import Session
+from datetime import datetime, timedelta
+from app.database import get_db
+from app.config import get_settings
+from app.schemas import UserResponse
+import logging
+
+settings = get_settings()
+logger = logging.getLogger(__name__)
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Security scheme
+security = HTTPBearer()
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def create_access_token(data: dict, expires_delta: timedelta = None) -> str:
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    return encoded_jwt
+
+def _get_display_name(user) -> str:
+    """Helper function to get display name"""
+    if user.alias:
+        return user.alias
+    return f"{user.name} {user.surname}"
+
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+) -> UserResponse:
+    """Get current authenticated user"""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    try:
+        # Extract token from credentials
+        token = credentials.credentials
+        
+        # Decode JWT token
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id_str: str = payload.get("sub")
+        if user_id_str is None:
+            raise credentials_exception
+        
+        # Convert to integer
+        user_id = int(user_id_str)
+            
+    except (JWTError, ValueError):
+        raise credentials_exception
+    
+    # Get user from database by ID
+    from app.models import User
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise credentials_exception
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Inactive user"
+        )
+    
+    user_response = UserResponse.model_validate(user)
+    user_response.display_name = _get_display_name(user)
+    return user_response
+
+
+# ============================================================================
+# FRONTEND FILES
+# ============================================================================
+
+### MODIFIED FILE: Vue-Frontend/src/components/features/landing/RegisterForm.vue
+<template>
+  <div class="bg-white p-8 rounded-2xl shadow-lg">
+    <h2 class="text-2xl font-bold text-gray-900 mb-6">Create Account</h2>
+    
+    <!-- OAuth Buttons -->
+    <div class="space-y-3 mb-6">
+      <button
+        @click="handleGoogleSignup"
+        :disabled="isLoading"
+        class="w-full flex items-center justify-center gap-3 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <svg class="w-5 h-5" viewBox="0 0 24 24">
+          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+        </svg>
+        <span class="text-gray-700 font-medium">Continue with Google</span>
+      </button>
+
+      <button
+        @click="handleMicrosoftSignup"
+        :disabled="isLoading"
+        class="w-full flex items-center justify-center gap-3 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        <svg class="w-5 h-5" viewBox="0 0 23 23">
+          <path fill="#f3f3f3" d="M0 0h23v23H0z"/>
+          <path fill="#f35325" d="M1 1h10v10H1z"/>
+          <path fill="#81bc06" d="M12 1h10v10H12z"/>
+          <path fill="#05a6f0" d="M1 12h10v10H1z"/>
+          <path fill="#ffba08" d="M12 12h10v10H12z"/>
+        </svg>
+        <span class="text-gray-700 font-medium">Continue with Microsoft</span>
+      </button>
+    </div>
+
+    <div class="relative mb-6">
+      <div class="absolute inset-0 flex items-center">
+        <div class="w-full border-t border-gray-300"></div>
+      </div>
+      <div class="relative flex justify-center text-sm">
+        <span class="px-2 bg-white text-gray-500">Or continue with email</span>
+      </div>
+    </div>
+    
+    <!-- Email/Password Form -->
+    <form @submit.prevent="handleEmailSubmit" class="space-y-4">
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label for="name" class="block text-sm font-medium text-gray-700 mb-1">
+            Name
+          </label>
+          <input
+            id="name"
+            v-model="form.name"
+            type="text"
+            required
+            class="input-field"
+            placeholder="First name"
+          />
+        </div>
+
+        <div>
+          <label for="surname" class="block text-sm font-medium text-gray-700 mb-1">
+            Surname
+          </label>
+          <input
+            id="surname"
+            v-model="form.surname"
+            type="text"
+            required
+            class="input-field"
+            placeholder="Last name"
+          />
+        </div>
+      </div>
+
+      <div>
+        <label for="email" class="block text-sm font-medium text-gray-700 mb-1">
+          Email
+        </label>
+        <input
+          id="email"
+          v-model="form.email"
+          type="email"
+          required
+          class="input-field"
+          placeholder="Enter your email"
+        />
+      </div>
+
+      <div>
+        <label for="alias" class="block text-sm font-medium text-gray-700 mb-1">
+          Alias <span class="text-gray-500 text-xs">(optional)</span>
+        </label>
+        <input
+          id="alias"
+          v-model="form.alias"
+          type="text"
+          class="input-field"
+          placeholder="How you'd like to be called"
+        />
+        <p class="text-xs text-gray-500 mt-1">
+          If set, this is how you'll be displayed. Otherwise we'll use your full name.
+        </p>
+      </div>
+
+      <div>
+        <label for="password" class="block text-sm font-medium text-gray-700 mb-1">
+          Password
+        </label>
+        <input
+          id="password"
+          v-model="form.password"
+          type="password"
+          required
+          minlength="6"
+          class="input-field"
+          placeholder="Create a password (min 6 characters)"
+        />
+      </div>
+
+      <div v-if="error" class="text-red-600 text-sm">
+        {{ error }}
+      </div>
+
+      <div v-if="successMessage" class="text-green-600 text-sm">
+        {{ successMessage }}
+      </div>
+
+      <button 
+        type="submit" 
+        :disabled="isLoading"
+        class="w-full btn-primary"
+      >
+        <span v-if="isLoading">Creating account...</span>
+        <span v-else>Register with Email</span>
+      </button>
+    </form>
+
+    <div class="mt-6 text-center space-y-2">
+      <button 
+        @click="$emit('switch-to-login')"
+        class="text-primary-600 hover:text-primary-700 font-medium"
+      >
+        Already have an account? Login
+      </button>
+      <br>
+      <button 
+        @click="$emit('cancel')"
+        class="text-gray-600 hover:text-gray-700"
+      >
+        Back
+      </button>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+import { 
+  auth, 
+  googleProvider, 
+  microsoftProvider, 
+  signInWithPopup,
+  createUserWithEmailAndPassword,
+  sendEmailVerification
+} from '@/config/firebase'
+
+const emit = defineEmits(['success', 'switch-to-login', 'cancel'])
+
+const authStore = useAuthStore()
+const form = ref({
+  name: '',
+  surname: '',
+  email: '',
+  alias: '',
+  password: ''
+})
+const error = ref('')
+const successMessage = ref('')
+const isLoading = ref(false)
+
+// Email/Password Registration
+const handleEmailSubmit = async () => {
+  isLoading.value = true
+  error.value = ''
+  successMessage.value = ''
+  
+  try {
+    // Step 1: Create Firebase account
+    const userCredential = await createUserWithEmailAndPassword(
+      auth, 
+      form.value.email, 
+      form.value.password
+    )
+    
+    // Step 2: Send verification email
+    await sendEmailVerification(userCredential.user)
+    successMessage.value = 'Verification email sent! Please check your inbox.'
+    
+    // Step 3: Get Firebase ID token
+    const idToken = await userCredential.user.getIdToken()
+    
+    // Step 4: Send to backend with name, surname, and alias
+    const result = await authStore.firebaseLogin({
+      idToken: idToken,
+      name: form.value.name,
+      surname: form.value.surname,
+      alias: form.value.alias || null
+    })
+    
+    if (result.success) {
+      emit('success')
+    } else {
+      error.value = result.message
+    }
+  } catch (err) {
+    console.error('Registration error:', err)
+    if (err.code === 'auth/email-already-in-use') {
+      error.value = 'Email already registered. Please login instead.'
+    } else if (err.code === 'auth/weak-password') {
+      error.value = 'Password is too weak. Use at least 6 characters.'
+    } else if (err.code === 'auth/invalid-email') {
+      error.value = 'Invalid email address'
+    } else {
+      error.value = err.message || 'Registration failed'
+    }
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// Google OAuth
+const handleGoogleSignup = async () => {
+  isLoading.value = true
+  error.value = ''
+  
+  try {
+    const result = await signInWithPopup(auth, googleProvider)
+    const idToken = await result.user.getIdToken()
+    
+    // OAuth auto-generates name/surname from display name
+    const loginResult = await authStore.firebaseLogin(idToken)
+    
+    if (loginResult.success) {
+      emit('success')
+    } else {
+      error.value = loginResult.message
+    }
+  } catch (err) {
+    console.error('Google signup error:', err)
+    if (err.code === 'auth/popup-closed-by-user') {
+      error.value = 'Sign-up cancelled'
+    } else if (err.code === 'auth/account-exists-with-different-credential') {
+      error.value = 'An account already exists with this email using a different sign-in method'
+    } else {
+      error.value = err.message || 'Google signup failed'
+    }
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// Microsoft OAuth
+const handleMicrosoftSignup = async () => {
+  isLoading.value = true
+  error.value = ''
+  
+  try {
+    const result = await signInWithPopup(auth, microsoftProvider)
+    const idToken = await result.user.getIdToken()
+    
+    // OAuth auto-generates name/surname from display name
+    const loginResult = await authStore.firebaseLogin(idToken)
+    
+    if (loginResult.success) {
+      emit('success')
+    } else {
+      error.value = loginResult.message
+    }
+  } catch (err) {
+    console.error('Microsoft signup error:', err)
+    if (err.code === 'auth/popup-closed-by-user') {
+      error.value = 'Sign-up cancelled'
+    } else if (err.code === 'auth/account-exists-with-different-credential') {
+      error.value = 'An account already exists with this email using a different sign-in method'
+    } else {
+      error.value = err.message || 'Microsoft signup failed'
+    }
+  } finally {
+    isLoading.value = false
+  }
+}
+</script>
+
+
+### MODIFIED FILE: Vue-Frontend/src/stores/auth.js
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+import { authService } from '@/services/auth/authService'
+
+export const useAuthStore = defineStore('auth', () => {
+  const user = ref(null)
+  const token = ref(localStorage.getItem('token') || null)
+  const isLoading = ref(false)
+
+  const isAuthenticated = computed(() => !!token.value && !!user.value)
+  
+  // Computed property for display name
+  const displayName = computed(() => {
+    if (!user.value) return ''
+    return user.value.display_name || `${user.value.name} ${user.value.surname}`
+  })
+
+  const login = async (credentials) => {
+    isLoading.value = true
+    try {
+      const response = await authService.login(credentials)
+      token.value = response.data.access_token
+      user.value = response.data.user
+      localStorage.setItem('token', token.value)
+      return { success: true }
+    } catch (error) {
+      return { success: false, message: error.response?.data?.detail || 'Login failed' }
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  const register = async (userData) => {
+    isLoading.value = true
+    try {
+      console.log('Register: Creating account...') // DEBUG
+      
+      // First, create the account
+      const registerResponse = await authService.register(userData)
+      console.log('Register: Account created:', registerResponse.data) // DEBUG
+      
+      // Registration successful, now login to get token
+      console.log('Register: Logging in...') // DEBUG
+      const loginResponse = await authService.login({
+        email: userData.email,
+        password: userData.password
+      })
+      console.log('Register: Login response:', loginResponse.data) // DEBUG
+      
+      // Store token and user data
+      token.value = loginResponse.data.access_token
+      user.value = loginResponse.data.user || registerResponse.data
+      localStorage.setItem('token', token.value)
+      
+      console.log('Register: Success! Token:', token.value) // DEBUG
+      console.log('Register: User:', user.value) // DEBUG
+      
+      return { success: true }
+    } catch (error) {
+      console.error('Register: Error occurred:', error) // DEBUG
+      console.error('Register: Error response:', error.response) // DEBUG
+      return { 
+        success: false, 
+        message: error.response?.data?.detail || error.response?.data?.message || 'Registration failed' 
+      }
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  // Firebase authentication
+  const firebaseLogin = async (data) => {
+    isLoading.value = true
+    try {
+      // data can be just idToken string OR { idToken, name, surname, alias }
+      const payload = typeof data === 'string' 
+        ? { id_token: data }
+        : { 
+            id_token: data.idToken,
+            name: data.name,
+            surname: data.surname,
+            alias: data.alias
+          }
+      
+      const response = await authService.firebaseLogin(payload)
+      token.value = response.data.access_token
+      user.value = response.data.user
+      localStorage.setItem('token', token.value)
+      return { success: true }
+    } catch (error) {
+      return { 
+        success: false, 
+        message: error.response?.data?.detail || 'Firebase login failed' 
+      }
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  const logout = () => {
+    user.value = null
+    token.value = null
+    localStorage.removeItem('token')
+  }
+
+  const initializeAuth = async () => {
+    if (token.value) {
+      try {
+        const response = await authService.getCurrentUser()
+        user.value = response.data
+      } catch (error) {
+        logout()
+      }
+    }
+  }
+
+  return {
+    user,
+    token,
+    isLoading,
+    isAuthenticated,
+    displayName,  // NEW
+    login,
+    register,
+    firebaseLogin,
+    logout,
+    initializeAuth
+  }
+})
+
+
+### MODIFIED FILE: Vue-Frontend/src/components/features/dashboard/VerificationBanner.vue
+<template>
+  <div 
+    v-if="shouldShowBanner" 
+    class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4 animate-slideDown"
+  >
+    <div class="flex justify-between items-start">
+      <div class="flex items-start">
+        <svg 
+          class="h-6 w-6 text-yellow-400 mr-3 flex-shrink-0 mt-0.5" 
+          viewBox="0 0 20 20" 
+          fill="currentColor"
+        >
+          <path 
+            fill-rule="evenodd" 
+            d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+          />
+        </svg>
+        <div class="flex-1">
+          <h3 class="text-sm font-medium text-yellow-800 mb-1">
+            Email Verification Required
+          </h3>
+          <p class="text-sm text-yellow-700 mb-3">
+            Please verify your email address to unlock all features and ensure account security.
+            Check your inbox for the verification link.
+          </p>
+          <div class="flex items-center space-x-4">
+            <button
+              @click="resendVerification"
+              :disabled="isResending || cooldownActive"
+              class="text-sm font-medium text-yellow-800 hover:text-yellow-900 underline disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {{ buttonText }}
+            </button>
+            <button
+              @click="checkVerificationStatus"
+              :disabled="isChecking"
+              class="text-sm font-medium text-yellow-800 hover:text-yellow-900 underline disabled:opacity-50"
+            >
+              {{ isChecking ? 'Checking...' : 'I just verified, refresh' }}
+            </button>
+          </div>
+        </div>
+      </div>
+      <button
+        @click="dismissBanner"
+        class="text-yellow-700 hover:text-yellow-900 ml-4 flex-shrink-0"
+        aria-label="Close banner"
+      >
+        <svg class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+          <path 
+            fill-rule="evenodd" 
+            d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z"
+          />
+        </svg>
+      </button>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted } from 'vue'
+import { useAuthStore } from '@/stores/auth'
+import { auth, sendEmailVerification } from '@/config/firebase'
+
+const authStore = useAuthStore()
+const isDismissed = ref(false)
+const isResending = ref(false)
+const isChecking = ref(false)
+const cooldownActive = ref(false)
+const cooldownSeconds = ref(0)
+
+const isVerified = computed(() => authStore.user?.email_verified)
+const isFirebaseUser = computed(() => authStore.user?.auth_provider !== 'email')
+
+const shouldShowBanner = computed(() => {
+  return !isVerified.value && !isDismissed.value && isFirebaseUser.value
+})
+
+const buttonText = computed(() => {
+  if (isResending.value) return 'Sending...'
+  if (cooldownActive.value) return `Wait ${cooldownSeconds.value}s`
+  return 'Resend Verification Email'
+})
+
+const resendVerification = async () => {
+  isResending.value = true
+  
+  try {
+    const currentUser = auth.currentUser
+    
+    if (!currentUser) {
+      alert('Error: Not authenticated with Firebase. Please log out and log in again.')
+      return
+    }
+    
+    await sendEmailVerification(currentUser)
+    alert('✅ Verification email sent! Please check your inbox (and spam folder).')
+    
+    // Start 60-second cooldown
+    startCooldown()
+  } catch (error) {
+    console.error('Error sending verification email:', error)
+    
+    if (error.code === 'auth/too-many-requests') {
+      alert('⚠️ Too many requests. Please wait a few minutes before trying again.')
+    } else {
+      alert('❌ Error sending email: ' + error.message)
+    }
+  } finally {
+    isResending.value = false
+  }
+}
+
+const checkVerificationStatus = async () => {
+  isChecking.value = true
+  
+  try {
+    const currentUser = auth.currentUser
+    
+    if (!currentUser) {
+      alert('Error: Not authenticated. Please log out and log in again.')
+      return
+    }
+    
+    // Reload user data from Firebase
+    await currentUser.reload()
+    
+    if (currentUser.emailVerified) {
+      // Update backend
+      const idToken = await currentUser.getIdToken(true) // Force refresh token
+      await authStore.firebaseLogin(idToken)
+      
+      alert('✅ Email verified successfully! Welcome to StudHelper.')
+      isDismissed.value = true
+    } else {
+      alert('⚠️ Email not verified yet. Please check your inbox and click the verification link.')
+    }
+  } catch (error) {
+    console.error('Error checking verification status:', error)
+    alert('❌ Error checking status: ' + error.message)
+  } finally {
+    isChecking.value = false
+  }
+}
+
+const dismissBanner = () => {
+  isDismissed.value = true
+  sessionStorage.setItem('verification_banner_dismissed', 'true')
+}
+
+const startCooldown = () => {
+  cooldownActive.value = true
+  cooldownSeconds.value = 60
+  
+  const interval = setInterval(() => {
+    cooldownSeconds.value--
+    
+    if (cooldownSeconds.value <= 0) {
+      clearInterval(interval)
+      cooldownActive.value = false
+    }
+  }, 1000)
+}
+
+onMounted(() => {
+  const wasDismissed = sessionStorage.getItem('verification_banner_dismissed')
+  if (wasDismissed) {
+    isDismissed.value = true
+  }
+})
+</script>
+
+<style scoped>
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slideDown {
+  animation: slideDown 0.3s ease-out;
+}
+</style>

@@ -22,18 +22,22 @@ class User(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
-    username = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=True)  # CHANGED: nullable=True for Firebase OAuth users
-    full_name = Column(String)
+    
+    # NEW: Name fields replacing username/full_name
+    name = Column(String, nullable=False)
+    surname = Column(String, nullable=False)
+    alias = Column(String, nullable=True)  # Optional display name
+    
+    hashed_password = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True)
     
-    # NEW: Firebase authentication fields
+    # Firebase authentication fields
     firebase_uid = Column(String, unique=True, nullable=True, index=True)
-    auth_provider = Column(String, default='email')  # 'email', 'google', 'microsoft'
+    auth_provider = Column(String, default='email')
     email_verified = Column(Boolean, default=False)
     
-    # Relationships - specify foreign_keys to resolve ambiguity
+    # Relationships
     owned_classes = relationship("Class", back_populates="owner")
     class_memberships = relationship("ClassMembership", back_populates="user")
     chat_sessions = relationship("ChatSession", back_populates="user")
@@ -75,9 +79,9 @@ class ClassMembership(Base):
     
     # Billing and limits
     is_sponsored = Column(Boolean, default=False)
-    daily_token_limit = Column(Integer, default=1_000_000)    # 1M tokens
-    weekly_token_limit = Column(Integer, default=5_000_000)   # 5M tokens
-    monthly_token_limit = Column(Integer, default=15_000_000) # 15M tokens
+    daily_token_limit = Column(Integer, default=1_000_000)
+    weekly_token_limit = Column(Integer, default=5_000_000)
+    monthly_token_limit = Column(Integer, default=15_000_000)
     
     # Relationships
     user = relationship("User", back_populates="class_memberships")
@@ -143,7 +147,7 @@ class DocumentChunk(Base):
     chunk_index = Column(Integer, nullable=False)
     char_start = Column(Integer, nullable=False)
     char_end = Column(Integer, nullable=False)
-    vector_id = Column(String, nullable=True)  # Vector store ID
+    vector_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -187,7 +191,7 @@ class UsageRecord(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     model_name = Column(String, nullable=False)
-    operation_type = Column(String, nullable=False)  # 'chat', 'embedding'
+    operation_type = Column(String, nullable=False)
     input_tokens = Column(Integer, default=0)
     output_tokens = Column(Integer, default=0)
     cost = Column(Float, nullable=False)

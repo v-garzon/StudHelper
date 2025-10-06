@@ -61,20 +61,52 @@
 
       <div>
         <label for="password" class="block text-sm font-medium text-gray-700 mb-1">
-          Password
+            Password
         </label>
-        <input
-          id="password"
-          v-model="form.password"
-          type="password"
-          required
-          class="input-field"
-          placeholder="Enter your password"
-        />
-      </div>
+        <div class="relative">
+            <input
+            id="password"
+            v-model="form.password"
+            :type="showPassword ? 'text' : 'password'"
+            required
+            class="input-field pr-10"
+            placeholder="Enter your password"
+            />
+            <button
+            type="button"
+            @mousedown="showPassword = true"
+            @mouseup="showPassword = false"
+            @mouseleave="showPassword = false"
+            @touchstart="showPassword = true"
+            @touchend="showPassword = false"
+            class="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-500 hover:text-gray-700 focus:outline-none"
+            tabindex="-1"
+            >
+            <svg 
+                v-if="!showPassword" 
+                class="w-5 h-5" 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+            >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+            </svg>
+            <svg 
+                v-else 
+                class="w-5 h-5" 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+            >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path>
+            </svg>
+            </button>
+        </div>
+        </div>
 
-      <div v-if="error" class="text-red-600 text-sm">
-        {{ error }}
+      <div v-if="error" class="bg-red-50 border border-red-200 rounded-lg p-3">
+        <p class="text-red-800 text-sm font-medium">{{ error }}</p>
       </div>
 
       <button 
@@ -134,6 +166,8 @@ const form = ref({
 const error = ref('')
 const isLoading = ref(false)
 
+const showPassword = ref(false)
+
 // Email/Password Login
 const handleEmailLogin = async () => {
   isLoading.value = true
@@ -150,7 +184,7 @@ const handleEmailLogin = async () => {
     // Get Firebase ID token
     const idToken = await userCredential.user.getIdToken()
     
-    // Send to backend (no username/full_name needed - existing user)
+    // Send to backend
     const result = await authStore.firebaseLogin(idToken)
     
     if (result.success) {
@@ -160,16 +194,22 @@ const handleEmailLogin = async () => {
     }
   } catch (err) {
     console.error('Login error:', err)
+    
+    // Detailed error messages
     if (err.code === 'auth/user-not-found') {
-      error.value = 'No account found with this email'
+      error.value = 'No account found with this email address. Please check your email or register for a new account.'
     } else if (err.code === 'auth/wrong-password') {
-      error.value = 'Incorrect password'
-    } else if (err.code === 'auth/too-many-requests') {
-      error.value = 'Too many failed attempts. Try again later.'
+      error.value = 'Incorrect password. Please try again or use "Forgot Password" to reset it.'
     } else if (err.code === 'auth/invalid-credential') {
-      error.value = 'Invalid email or password'
+      error.value = 'Invalid email or password. Please check your credentials and try again.'
+    } else if (err.code === 'auth/too-many-requests') {
+      error.value = 'Too many failed login attempts. Your account has been temporarily locked. Please try again later or reset your password.'
+    } else if (err.code === 'auth/invalid-email') {
+      error.value = 'Invalid email format. Please enter a valid email address.'
+    } else if (err.code === 'auth/user-disabled') {
+      error.value = 'This account has been disabled. Please contact support for assistance.'
     } else {
-      error.value = err.message || 'Login failed'
+      error.value = 'Login failed: ' + (err.message || 'Unknown error occurred. Please try again.')
     }
   } finally {
     isLoading.value = false
@@ -195,9 +235,13 @@ const handleGoogleLogin = async () => {
   } catch (err) {
     console.error('Google login error:', err)
     if (err.code === 'auth/popup-closed-by-user') {
-      error.value = 'Sign-in cancelled'
+      error.value = 'Sign-in cancelled. Please try again.'
+    } else if (err.code === 'auth/popup-blocked') {
+      error.value = 'Popup was blocked by your browser. Please allow popups for this site and try again.'
+    } else if (err.code === 'auth/account-exists-with-different-credential') {
+      error.value = 'An account already exists with this email using a different sign-in method. Please use that method to login.'
     } else {
-      error.value = err.message || 'Google login failed'
+      error.value = 'Google login failed: ' + (err.message || 'Unknown error')
     }
   } finally {
     isLoading.value = false
@@ -223,9 +267,13 @@ const handleMicrosoftLogin = async () => {
   } catch (err) {
     console.error('Microsoft login error:', err)
     if (err.code === 'auth/popup-closed-by-user') {
-      error.value = 'Sign-in cancelled'
+      error.value = 'Sign-in cancelled. Please try again.'
+    } else if (err.code === 'auth/popup-blocked') {
+      error.value = 'Popup was blocked by your browser. Please allow popups for this site and try again.'
+    } else if (err.code === 'auth/account-exists-with-different-credential') {
+      error.value = 'An account already exists with this email using a different sign-in method. Please use that method to login.'
     } else {
-      error.value = err.message || 'Microsoft login failed'
+      error.value = 'Microsoft login failed: ' + (err.message || 'Unknown error')
     }
   } finally {
     isLoading.value = false
@@ -234,14 +282,20 @@ const handleMicrosoftLogin = async () => {
 
 // Password Reset
 const handleForgotPassword = async () => {
-  const email = prompt('Enter your email address:')
+  const email = prompt('Enter your email address to reset your password:')
   if (!email) return
   
   try {
     await sendPasswordResetEmail(auth, email)
-    alert('Password reset email sent! Check your inbox.')
+    alert('✅ Password reset email sent! Please check your inbox and follow the instructions.')
   } catch (err) {
-    alert('Error: ' + (err.message || 'Could not send reset email'))
+    if (err.code === 'auth/user-not-found') {
+      alert('❌ No account found with this email address.')
+    } else if (err.code === 'auth/invalid-email') {
+      alert('❌ Invalid email address format.')
+    } else {
+      alert('❌ Error: ' + (err.message || 'Could not send reset email. Please try again.'))
+    }
   }
 }
 </script>

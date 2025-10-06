@@ -45,18 +45,34 @@
     
     <!-- Email/Password Form -->
     <form @submit.prevent="handleEmailSubmit" class="space-y-4">
-      <div>
-        <label for="full_name" class="block text-sm font-medium text-gray-700 mb-1">
-          Full Name
-        </label>
-        <input
-          id="full_name"
-          v-model="form.full_name"
-          type="text"
-          required
-          class="input-field"
-          placeholder="Enter your full name"
-        />
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label for="name" class="block text-sm font-medium text-gray-700 mb-1">
+            Name
+          </label>
+          <input
+            id="name"
+            v-model="form.name"
+            type="text"
+            required
+            class="input-field"
+            placeholder="First name"
+          />
+        </div>
+
+        <div>
+          <label for="surname" class="block text-sm font-medium text-gray-700 mb-1">
+            Surname
+          </label>
+          <input
+            id="surname"
+            v-model="form.surname"
+            type="text"
+            required
+            class="input-field"
+            placeholder="Last name"
+          />
+        </div>
       </div>
 
       <div>
@@ -70,50 +86,187 @@
           required
           class="input-field"
           placeholder="Enter your email"
+          @blur="validateEmail"
         />
+        <p v-if="emailError" class="text-red-600 text-xs mt-1">
+          {{ emailError }}
+        </p>
       </div>
 
       <div>
-        <label for="username" class="block text-sm font-medium text-gray-700 mb-1">
-          Username
+        <label for="alias" class="block text-sm font-medium text-gray-700 mb-1">
+          Alias <span class="text-gray-500 text-xs">(optional)</span>
         </label>
         <input
-          id="username"
-          v-model="form.username"
+          id="alias"
+          v-model="form.alias"
           type="text"
-          required
           class="input-field"
-          placeholder="Choose a username"
+          placeholder="How you'd like to be called"
         />
+        <p class="text-xs text-gray-500 mt-1">
+          If set, this is how you'll be displayed. Otherwise we'll use your full name.
+        </p>
       </div>
 
       <div>
         <label for="password" class="block text-sm font-medium text-gray-700 mb-1">
-          Password
+            Password
         </label>
-        <input
-          id="password"
-          v-model="form.password"
-          type="password"
-          required
-          minlength="6"
-          class="input-field"
-          placeholder="Create a password (min 6 characters)"
-        />
+        <div class="relative">
+            <input
+            id="password"
+            v-model="form.password"
+            :type="showPassword ? 'text' : 'password'"
+            required
+            class="input-field pr-10"
+            placeholder="Create a password"
+            @input="checkPasswordStrength"
+            />
+            <button
+            type="button"
+            @mousedown="showPassword = true"
+            @mouseup="showPassword = false"
+            @mouseleave="showPassword = false"
+            @touchstart="showPassword = true"
+            @touchend="showPassword = false"
+            class="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-500 hover:text-gray-700 focus:outline-none"
+            tabindex="-1"
+            >
+            <svg 
+                v-if="!showPassword" 
+                class="w-5 h-5" 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+            >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+            </svg>
+            <svg 
+                v-else 
+                class="w-5 h-5" 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+            >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path>
+            </svg>
+            </button>
+        </div>
+        
+        <!-- Password Strength Indicator -->
+        <div v-if="form.password" class="mt-2">
+          <div class="flex items-center gap-2 mb-1">
+            <div class="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+              <div 
+                :class="[
+                  'h-full transition-all duration-300',
+                  passwordStrength.color === 'red' ? 'bg-red-500 w-1/3' : '',
+                  passwordStrength.color === 'yellow' ? 'bg-yellow-500 w-2/3' : '',
+                  passwordStrength.color === 'green' ? 'bg-green-500 w-full' : ''
+                ]"
+              ></div>
+            </div>
+            <span 
+              :class="[
+                'text-xs font-medium',
+                passwordStrength.color === 'red' ? 'text-red-600' : '',
+                passwordStrength.color === 'yellow' ? 'text-yellow-600' : '',
+                passwordStrength.color === 'green' ? 'text-green-600' : ''
+              ]"
+            >
+              {{ passwordStrength.label }}
+            </span>
+          </div>
+          
+          <!-- Password Requirements -->
+          <div class="space-y-1 text-xs">
+            <div :class="passwordRequirements.minLength ? 'text-green-600' : 'text-gray-500'">
+                <span>{{ passwordRequirements.minLength ? '✓' : '○' }}</span>
+                At least 6 characters
+            </div>
+            <div :class="passwordRequirements.hasUppercase ? 'text-green-600' : 'text-gray-500'">
+                <span>{{ passwordRequirements.hasUppercase ? '✓' : '○' }}</span>
+                At least 1 uppercase letter
+            </div>
+            <div :class="passwordRequirements.hasNumbers ? 'text-green-600' : 'text-gray-500'">
+                <span>{{ passwordRequirements.hasNumbers ? '✓' : '○' }}</span>
+                At least 1 number
+            </div>
+            <div :class="passwordRequirements.hasSpecialChars ? 'text-green-600' : 'text-gray-500'">
+                <span>{{ passwordRequirements.hasSpecialChars ? '✓' : '○' }}</span>
+                Special character (!@#$%^&*) <span class="text-gray-400">- for strong password</span>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div v-if="error" class="text-red-600 text-sm">
-        {{ error }}
+      <div>
+        <label for="confirmPassword" class="block text-sm font-medium text-gray-700 mb-1">
+            Confirm Password
+        </label>
+        <div class="relative">
+            <input
+            id="confirmPassword"
+            v-model="form.confirmPassword"
+            :type="showConfirmPassword ? 'text' : 'password'"
+            required
+            class="input-field pr-10"
+            placeholder="Re-enter your password"
+            @input="checkPasswordMatch"
+            />
+            <button
+            type="button"
+            @mousedown="showConfirmPassword = true"
+            @mouseup="showConfirmPassword = false"
+            @mouseleave="showConfirmPassword = false"
+            @touchstart="showConfirmPassword = true"
+            @touchend="showConfirmPassword = false"
+            class="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-gray-500 hover:text-gray-700 focus:outline-none"
+            tabindex="-1"
+            >
+            <svg 
+                v-if="!showConfirmPassword" 
+                class="w-5 h-5" 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+            >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+            </svg>
+            <svg 
+                v-else 
+                class="w-5 h-5" 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+            >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"></path>
+            </svg>
+            </button>
+        </div>
+        <p v-if="passwordMatchError && form.confirmPassword" class="text-red-600 text-xs mt-1">
+          {{ passwordMatchError }}
+        </p>
+        <p v-if="!passwordMatchError && form.confirmPassword && form.password === form.confirmPassword" class="text-green-600 text-xs mt-1">
+          ✓ Passwords match
+        </p>
       </div>
 
-      <div v-if="successMessage" class="text-green-600 text-sm">
-        {{ successMessage }}
+      <div v-if="error" class="bg-red-50 border border-red-200 rounded-lg p-3">
+        <p class="text-red-800 text-sm font-medium">{{ error }}</p>
+      </div>
+
+      <div v-if="successMessage" class="bg-green-50 border border-green-200 rounded-lg p-3">
+        <p class="text-green-800 text-sm font-medium">{{ successMessage }}</p>
       </div>
 
       <button 
         type="submit" 
-        :disabled="isLoading"
-        class="w-full btn-primary"
+        :disabled="isLoading || !isFormValid"
+        class="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <span v-if="isLoading">Creating account...</span>
         <span v-else>Register with Email</span>
@@ -139,7 +292,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { 
   auth, 
@@ -154,17 +307,104 @@ const emit = defineEmits(['success', 'switch-to-login', 'cancel'])
 
 const authStore = useAuthStore()
 const form = ref({
-  full_name: '',
+  name: '',
+  surname: '',
   email: '',
-  username: '',
-  password: ''
+  alias: '',
+  password: '',
+  confirmPassword: ''
 })
 const error = ref('')
+const emailError = ref('')
+const passwordMatchError = ref('')
 const successMessage = ref('')
 const isLoading = ref(false)
 
+const showPassword = ref(false)
+const showConfirmPassword = ref(false)
+
+const passwordRequirements = ref({
+  minLength: false,
+  hasUppercase: false,
+  hasNumbers: false,
+  hasSpecialChars: false  // NEW
+})
+
+const passwordStrength = ref({
+  color: 'red',
+  label: 'Weak'
+})
+
+// Email validation
+const validateEmail = () => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (form.value.email && !emailRegex.test(form.value.email)) {
+    emailError.value = 'Please enter a valid email address'
+  } else {
+    emailError.value = ''
+  }
+}
+
+// Password strength checker
+const checkPasswordStrength = () => {
+  const password = form.value.password
+  
+  // Check requirements
+  passwordRequirements.value.minLength = password.length >= 6
+  passwordRequirements.value.hasUppercase = /[A-Z]/.test(password)
+  passwordRequirements.value.hasNumbers = (password.match(/\d/g) || []).length >= 1  // CHANGED: 3 → 1
+  passwordRequirements.value.hasSpecialChars = /[!@#$%^&*(),.?":{}|<>]/.test(password)  // NEW
+  
+  // Calculate strength
+  const meetsBasicRequirements = 
+    passwordRequirements.value.minLength && 
+    passwordRequirements.value.hasUppercase && 
+    passwordRequirements.value.hasNumbers
+  
+  const isLong = password.length >= 10
+  
+  if (!meetsBasicRequirements) {
+    passwordStrength.value = { color: 'red', label: 'Weak' }
+  } else if (passwordRequirements.value.hasSpecialChars && isLong) {
+    passwordStrength.value = { color: 'green', label: 'Strong' }
+  } else {
+    passwordStrength.value = { color: 'yellow', label: 'Medium' }
+  }
+}
+
+// Password match checker
+const checkPasswordMatch = () => {
+  if (form.value.confirmPassword && form.value.password !== form.value.confirmPassword) {
+    passwordMatchError.value = 'Passwords do not match'
+  } else {
+    passwordMatchError.value = ''
+  }
+}
+
+// Form validation
+const isFormValid = computed(() => {
+  return (
+    form.value.name &&
+    form.value.surname &&
+    form.value.email &&
+    !emailError.value &&
+    form.value.password &&
+    form.value.confirmPassword &&
+    form.value.password === form.value.confirmPassword &&
+    passwordRequirements.value.minLength &&
+    passwordRequirements.value.hasUppercase &&
+    passwordRequirements.value.hasNumbers
+  )
+})
+
 // Email/Password Registration
 const handleEmailSubmit = async () => {
+  // Final validation
+  if (!isFormValid.value) {
+    error.value = 'Please fill all required fields correctly'
+    return
+  }
+
   isLoading.value = true
   error.value = ''
   successMessage.value = ''
@@ -184,11 +424,12 @@ const handleEmailSubmit = async () => {
     // Step 3: Get Firebase ID token
     const idToken = await userCredential.user.getIdToken()
     
-    // Step 4: Send to backend with username and full_name
+    // Step 4: Send to backend with name, surname, and alias
     const result = await authStore.firebaseLogin({
       idToken: idToken,
-      username: form.value.username,
-      full_name: form.value.full_name
+      name: form.value.name,
+      surname: form.value.surname,
+      alias: form.value.alias || null
     })
     
     if (result.success) {
@@ -198,17 +439,42 @@ const handleEmailSubmit = async () => {
     }
   } catch (err) {
     console.error('Registration error:', err)
+    
+    // Detailed error messages
     if (err.code === 'auth/email-already-in-use') {
-      error.value = 'Email already registered. Please login instead.'
+      // Try to determine OAuth provider
+      const provider = await getEmailProvider(form.value.email)
+      if (provider) {
+        error.value = `This email is already registered with ${provider}. Please sign in using that method.`
+      } else {
+        error.value = 'This email is already registered. Please login instead or use "Forgot Password" if you need to reset it.'
+      }
     } else if (err.code === 'auth/weak-password') {
-      error.value = 'Password is too weak. Use at least 6 characters.'
+      error.value = 'Password does not meet requirements. Please ensure it has at least 6 characters, 1 uppercase letter, and 1 number.'
     } else if (err.code === 'auth/invalid-email') {
-      error.value = 'Invalid email address'
+      error.value = 'Invalid email format. Please check your email address.'
+    } else if (err.code === 'auth/operation-not-allowed') {
+      error.value = 'Email/password registration is currently disabled. Please contact support.'
+    } else if (err.response?.data?.detail) {
+      error.value = err.response.data.detail
     } else {
-      error.value = err.message || 'Registration failed'
+      error.value = 'Registration failed: ' + (err.message || 'Unknown error occurred. Please try again.')
     }
   } finally {
     isLoading.value = false
+  }
+}
+
+// Helper to get OAuth provider if email exists
+const getEmailProvider = async (email) => {
+  try {
+    const { fetchSignInMethodsForEmail } = await import('firebase/auth')
+    const methods = await fetchSignInMethodsForEmail(auth, email)
+    if (methods.includes('google.com')) return 'Google'
+    if (methods.includes('microsoft.com')) return 'Microsoft'
+    return null
+  } catch {
+    return null
   }
 }
 
@@ -221,7 +487,6 @@ const handleGoogleSignup = async () => {
     const result = await signInWithPopup(auth, googleProvider)
     const idToken = await result.user.getIdToken()
     
-    // Send to backend (no username/full_name - auto-generated)
     const loginResult = await authStore.firebaseLogin(idToken)
     
     if (loginResult.success) {
@@ -232,11 +497,13 @@ const handleGoogleSignup = async () => {
   } catch (err) {
     console.error('Google signup error:', err)
     if (err.code === 'auth/popup-closed-by-user') {
-      error.value = 'Sign-up cancelled'
+      error.value = 'Sign-up cancelled. Please try again.'
     } else if (err.code === 'auth/account-exists-with-different-credential') {
-      error.value = 'An account already exists with this email using a different sign-in method'
+      error.value = 'An account already exists with this email using a different sign-in method. Please use that method to login.'
+    } else if (err.code === 'auth/popup-blocked') {
+      error.value = 'Popup was blocked by your browser. Please allow popups for this site.'
     } else {
-      error.value = err.message || 'Google signup failed'
+      error.value = 'Google sign-up failed: ' + (err.message || 'Unknown error')
     }
   } finally {
     isLoading.value = false
@@ -252,7 +519,6 @@ const handleMicrosoftSignup = async () => {
     const result = await signInWithPopup(auth, microsoftProvider)
     const idToken = await result.user.getIdToken()
     
-    // Send to backend (no username/full_name - auto-generated)
     const loginResult = await authStore.firebaseLogin(idToken)
     
     if (loginResult.success) {
@@ -263,11 +529,13 @@ const handleMicrosoftSignup = async () => {
   } catch (err) {
     console.error('Microsoft signup error:', err)
     if (err.code === 'auth/popup-closed-by-user') {
-      error.value = 'Sign-up cancelled'
+      error.value = 'Sign-up cancelled. Please try again.'
     } else if (err.code === 'auth/account-exists-with-different-credential') {
-      error.value = 'An account already exists with this email using a different sign-in method'
+      error.value = 'An account already exists with this email using a different sign-in method. Please use that method to login.'
+    } else if (err.code === 'auth/popup-blocked') {
+      error.value = 'Popup was blocked by your browser. Please allow popups for this site.'
     } else {
-      error.value = err.message || 'Microsoft signup failed'
+      error.value = 'Microsoft sign-up failed: ' + (err.message || 'Unknown error')
     }
   } finally {
     isLoading.value = false

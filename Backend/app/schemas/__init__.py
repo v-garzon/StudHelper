@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from app.models import ProcessingStatus, DocumentScope
@@ -6,22 +6,26 @@ from app.models import ProcessingStatus, DocumentScope
 # User schemas
 class UserBase(BaseModel):
     email: EmailStr
-    username: str
-    full_name: Optional[str] = None
+    name: str
+    surname: str
+    alias: Optional[str] = None
 
 class UserCreate(UserBase):
     password: str
 
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
-    full_name: Optional[str] = None
+    name: Optional[str] = None
+    surname: Optional[str] = None
+    alias: Optional[str] = None
 
 class UserResponse(UserBase):
     id: int
     created_at: datetime
     is_active: bool
-    auth_provider: str  # NEW
-    email_verified: bool  # NEW
+    auth_provider: str
+    email_verified: bool
+    display_name: Optional[str] = None  # Computed field: alias or "Name Surname"
     
     class Config:
         from_attributes = True
@@ -33,13 +37,14 @@ class Token(BaseModel):
     user: UserResponse
 
 class LoginRequest(BaseModel):
-    username: str
+    email: EmailStr
     password: str
 
 class FirebaseLoginRequest(BaseModel):
     id_token: str
-    username: Optional[str] = None
-    full_name: Optional[str] = None
+    name: Optional[str] = None
+    surname: Optional[str] = None
+    alias: Optional[str] = None
 
 # Class schemas
 class ClassBase(BaseModel):
@@ -77,8 +82,7 @@ class PermissionUpdate(BaseModel):
 class MembershipResponse(BaseModel):
     id: int
     user_id: int
-    username: str
-    full_name: Optional[str]
+    user_display_name: str  # Changed from username
     joined_at: datetime
     is_manager: bool
     can_read: bool
@@ -170,7 +174,7 @@ class UsageStats(BaseModel):
 
 class ClassUsageOverview(BaseModel):
     user_id: int
-    username: str
+    user_display_name: str  # Changed from username
     usage_stats: UsageStats
     is_sponsored: bool
     last_activity: Optional[datetime]

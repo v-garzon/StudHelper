@@ -30,8 +30,8 @@ async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
     """Authenticate user with email/password (legacy method)"""
     try:
         auth_service = AuthService()
-        token_data = await auth_service.authenticate_user(db, login_data.username, login_data.password)
-        logger.info(f"User logged in: {login_data.username}")
+        token_data = await auth_service.authenticate_user(db, login_data.email, login_data.password)
+        logger.info(f"User logged in: {login_data.email}")
         return token_data
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -47,8 +47,9 @@ async def firebase_login(request: FirebaseLoginRequest, db: Session = Depends(ge
         token_data = await auth_service.firebase_authenticate(
             db, 
             request.id_token,
-            username=request.username,
-            full_name=request.full_name
+            name=request.name,
+            surname=request.surname,
+            alias=request.alias
         )
         logger.info(f"Firebase user logged in")
         return token_data
@@ -61,7 +62,7 @@ async def firebase_login(request: FirebaseLoginRequest, db: Session = Depends(ge
 @router.post("/logout")
 async def logout(current_user: UserResponse = Depends(get_current_user)):
     """Logout user (client should discard token)"""
-    logger.info(f"User logged out: {current_user.username}")
+    logger.info(f"User logged out: {current_user.email}")
     return {"message": "Successfully logged out"}
 
 @router.get("/me", response_model=UserResponse)
@@ -79,7 +80,7 @@ async def update_profile(
     try:
         auth_service = AuthService()
         updated_user = await auth_service.update_user(db, current_user.id, user_update)
-        logger.info(f"User profile updated: {current_user.username}")
+        logger.info(f"User profile updated: {current_user.email}")
         return updated_user
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -96,7 +97,7 @@ async def delete_account(
     try:
         auth_service = AuthService()
         await auth_service.delete_user(db, current_user.id)
-        logger.info(f"User account deleted: {current_user.username}")
+        logger.info(f"User account deleted: {current_user.email}")
         return {"message": "Account successfully deleted"}
     except Exception as e:
         logger.error(f"Error deleting account: {e}")

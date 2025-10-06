@@ -1,7 +1,7 @@
 <template>
     <div 
       v-if="shouldShowBanner" 
-      class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4 animate-slideDown"
+      class="absolute top-0 left-0 right-0 bg-yellow-50 border-l-4 border-yellow-400 p-4 shadow-md z-50 animate-slideDown"
     >
       <div class="flex justify-between items-start">
         <div class="flex items-start">
@@ -96,7 +96,6 @@
       await sendEmailVerification(currentUser)
       alert('✅ Verification email sent! Please check your inbox (and spam folder).')
       
-      // Start 60-second cooldown
       startCooldown()
     } catch (error) {
       console.error('Error sending verification email:', error)
@@ -122,12 +121,10 @@
         return
       }
       
-      // Reload user data from Firebase
       await currentUser.reload()
       
       if (currentUser.emailVerified) {
-        // Update backend
-        const idToken = await currentUser.getIdToken(true) // Force refresh token
+        const idToken = await currentUser.getIdToken(true)
         await authStore.firebaseLogin(idToken)
         
         alert('✅ Email verified successfully! Welcome to StudHelper.')
@@ -145,7 +142,6 @@
   
   const dismissBanner = () => {
     isDismissed.value = true
-    // Store dismissal in sessionStorage (will show again on page refresh)
     sessionStorage.setItem('verification_banner_dismissed', 'true')
   }
   
@@ -164,7 +160,6 @@
   }
   
   onMounted(() => {
-    // Check if banner was dismissed in this session
     const wasDismissed = sessionStorage.getItem('verification_banner_dismissed')
     if (wasDismissed) {
       isDismissed.value = true
@@ -176,7 +171,7 @@
   @keyframes slideDown {
     from {
       opacity: 0;
-      transform: translateY(-10px);
+      transform: translateY(-20px);
     }
     to {
       opacity: 1;
@@ -185,6 +180,6 @@
   }
   
   .animate-slideDown {
-    animation: slideDown 0.3s ease-out;
+    animation: slideDown 0.4s ease-out;
   }
   </style>
