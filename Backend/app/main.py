@@ -1,19 +1,23 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import auth
-from app.firebase_admin import initialize_firebase
 from app.config import get_settings
+from app.database import create_tables
+from app.routes import auth, classes, documents
+from app.firebase_admin import initialize_firebase
 import logging
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
 app = FastAPI(
     title="StudHelper API",
-    description="AI-powered study assistant with class-based learning",
+    description="Class-based AI learning platform API",
     version="1.0.0"
 )
 
@@ -26,8 +30,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Create database tables
+create_tables()
+
 # Include routers
-app.include_router(auth.router, prefix=f"{settings.API_V1_PREFIX}/auth", tags=["Authentication"])
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+app.include_router(classes.router, prefix="/api/v1/classes", tags=["Classes"])
+app.include_router(documents.router, prefix="/api/v1/documents", tags=["Documents"])
 
 @app.on_event("startup")
 async def startup_event():

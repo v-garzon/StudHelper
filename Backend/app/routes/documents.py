@@ -1,201 +1,320 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
-from typing import List
+from typing import Optional
 from app.database import get_db
-from app.schemas import DocumentResponse, UserResponse
-from app.services.permission_service import PermissionService
-from app.services.document_service import DocumentService
+from app.models import Document, DocumentScope, Class, ClassMembership, ChatSession
+from app.schemas.document_schemas import (
+    DocumentUploadResponse,
+    DocumentUpdateRequest,
+    DocumentListResponse,
+    YouTubeVideoRequest
+)
 from app.utils.security import get_current_user
-from app.config import get_settings
+from app.schemas import UserResponse
 import logging
 
-router = APIRouter()
-settings = get_settings()
 logger = logging.getLogger(__name__)
 
-@router.post("/classes/{class_id}/upload", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
+router = APIRouter()
+
+
+@router.post("/classes/{class_id}/upload", response_model=DocumentUploadResponse, status_code=201)
 async def upload_class_document(
     class_id: int,
     file: UploadFile = File(...),
-    current_user: UserResponse = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    description: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
 ):
-    """Upload a document to a class (available to all class chats)"""
+    """
+    Upload a document to a class.
+    
+    PLACEHOLDER: File processing will be implemented in Phase 3.
+    Currently just creates database record.
+    """
     try:
-        permission_service = PermissionService()
+        # Check if class exists
+        class_obj = db.query(Class).filter(Class.id == class_id).first()
+        if not class_obj:
+            raise HTTPException(status_code=404, detail="Class not found")
         
-        # Check if user can upload documents to this class
-        membership = await permission_service.get_user_membership(db, current_user.id, class_id)
-        if not membership:
-            raise HTTPException(status_code=403, detail="Access denied")
-        
-        if not membership.can_upload_documents:
-            raise HTTPException(status_code=403, detail="Document upload permission denied")
-        
-        # Upload and process document
-        document_service = DocumentService()
-        document = await document_service.upload_class_document(
-            db, file, class_id, current_user.id
-        )
-        
-        logger.info(f"Class document uploaded: {document.original_filename} by {current_user.username}")
-        return document
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error uploading class document: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-@router.post("/sessions/{session_id}/upload", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
-async def upload_session_document(
-    session_id: int,
-    file: UploadFile = File(...),
-    current_user: UserResponse = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Upload a document to a specific chat session"""
-    try:
-        from app.models import ChatSession
-        
-        # Verify session ownership
-        session = db.query(ChatSession).filter(
-            ChatSession.id == session_id,
-            ChatSession.user_id == current_user.id,
-            ChatSession.is_active == True
+        # Check if user is member
+        membership = db.query(ClassMembership).filter(
+            ClassMembership.class_id == class_id,
+            ClassMembership.user_id == current_user.id
         ).first()
         
-        if not session:
-            raise HTTPException(status_code=404, detail="Chat session not found")
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this class")
         
-        # Check upload permissions
-        permission_service = PermissionService()
-        membership = await permission_service.get_user_membership(db, current_user.id, session.class_id)
-        if not membership.can_upload_documents:
-            raise HTTPException(status_code=403, detail="Document upload permission denied")
+        # Validate file size (10MB limit)
+        if file.size and file.size > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="File size exceeds 10MB limit")
         
-        # Upload and process document
-        document_service = DocumentService()
-        document = await document_service.upload_session_document(
-            db, file, session_id, session.class_id, current_user.id
+        # Create document record
+        document = Document(
+            filename=file.filename,
+            original_filename=file.filename,
+            file_path=f"uploads/{class_id}/{file.filename}",  # PLACEHOLDER
+            file_type=file.filename.split('.')[-1].lower() if '.' in file.filename else 'unknown',
+            file_size=file.size or 0,
+            description=description,
+            scope=DocumentScope.CLASS,
+            class_id=class_id,
+            uploaded_by=current_user.id
         )
         
-        logger.info(f"Session document uploaded: {document.original_filename} by {current_user.username}")
-        return document
+        db.add(document)
+        db.commit()
+        db.refresh(document)
+        
+        logger.info(f"Document {document.id} uploaded to class {class_id} by user {current_user.id}")
+        
+        return DocumentUploadResponse(
+            id=document.id,
+            filename=document.filename,
+            original_filename=document.original_filename,
+            file_type=document.file_type,
+            file_size=document.file_size,
+            description=document.description,
+            url=document.url,
+            scope=document.scope.value,
+            class_id=document.class_id,
+            session_id=document.session_id,
+            uploaded_at=document.uploaded_at,
+            processing_status=document.processing_status.value
+        )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error uploading session document: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        db.rollback()
+        logger.error(f"Error uploading document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to upload document")
 
-@router.get("/classes/{class_id}", response_model=List[DocumentResponse])
+
+@router.post("/classes/{class_id}/upload-youtube", response_model=DocumentUploadResponse, status_code=201)
+async def upload_youtube_video(
+    class_id: int,
+    video: YouTubeVideoRequest,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Add a YouTube video to a class.
+    
+    PLACEHOLDER: Video processing will be implemented in Phase 3.
+    """
+    try:
+        # Check if class exists
+        class_obj = db.query(Class).filter(Class.id == class_id).first()
+        if not class_obj:
+            raise HTTPException(status_code=404, detail="Class not found")
+        
+        # Check if user is member
+        membership = db.query(ClassMembership).filter(
+            ClassMembership.class_id == class_id,
+            ClassMembership.user_id == current_user.id
+        ).first()
+        
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this class")
+        
+        # Extract video ID
+        video_url = str(video.url)
+        video_id = _extract_youtube_id(video_url)
+        
+        # Create document record
+        document = Document(
+            filename=f"YouTube: {video_id}",
+            original_filename=video_url,
+            file_path="",
+            file_type="youtube",
+            file_size=0,
+            description=video.description,
+            url=video_url,
+            scope=DocumentScope.CLASS,
+            class_id=class_id,
+            uploaded_by=current_user.id
+        )
+        
+        db.add(document)
+        db.commit()
+        db.refresh(document)
+        
+        logger.info(f"YouTube video {video_id} added to class {class_id} by user {current_user.id}")
+        
+        return DocumentUploadResponse(
+            id=document.id,
+            filename=document.filename,
+            original_filename=document.original_filename,
+            file_type=document.file_type,
+            file_size=document.file_size,
+            description=document.description,
+            url=document.url,
+            scope=document.scope.value,
+            class_id=document.class_id,
+            session_id=document.session_id,
+            uploaded_at=document.uploaded_at,
+            processing_status=document.processing_status.value
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error adding YouTube video: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to add YouTube video")
+
+
+@router.get("/classes/{class_id}", response_model=DocumentListResponse)
 async def get_class_documents(
     class_id: int,
-    current_user: UserResponse = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
 ):
-    """Get all documents uploaded to a class"""
+    """
+    Get all documents for a class.
+    """
     try:
-        permission_service = PermissionService()
+        # Check if user is member
+        membership = db.query(ClassMembership).filter(
+            ClassMembership.class_id == class_id,
+            ClassMembership.user_id == current_user.id
+        ).first()
         
-        # Check if user has read access to this class
-        membership = await permission_service.get_user_membership(db, current_user.id, class_id)
         if not membership:
-            raise HTTPException(status_code=403, detail="Access denied")
+            raise HTTPException(status_code=403, detail="Not a member of this class")
         
-        if not membership.can_read:
-            raise HTTPException(status_code=403, detail="Read permission denied")
-        
-        from app.models import Document, DocumentScope
-        
-        # Get class documents
         documents = db.query(Document).filter(
             Document.class_id == class_id,
             Document.scope == DocumentScope.CLASS
         ).order_by(Document.uploaded_at.desc()).all()
         
-        return [DocumentResponse.model_validate(doc) for doc in documents]
+        return DocumentListResponse(
+            documents=[
+                DocumentUploadResponse(
+                    id=doc.id,
+                    filename=doc.filename,
+                    original_filename=doc.original_filename,
+                    file_type=doc.file_type,
+                    file_size=doc.file_size,
+                    description=doc.description,
+                    url=doc.url,
+                    scope=doc.scope.value,
+                    class_id=doc.class_id,
+                    session_id=doc.session_id,
+                    uploaded_at=doc.uploaded_at,
+                    processing_status=doc.processing_status.value
+                )
+                for doc in documents
+            ]
+        )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting class documents: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        logger.error(f"Error fetching documents: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch documents")
 
-@router.get("/sessions/{session_id}", response_model=List[DocumentResponse])
-async def get_session_documents(
-    session_id: int,
-    current_user: UserResponse = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """Get all documents uploaded to a specific chat session"""
-    try:
-        from app.models import ChatSession, Document, DocumentScope
-        
-        # Verify session ownership
-        session = db.query(ChatSession).filter(
-            ChatSession.id == session_id,
-            ChatSession.user_id == current_user.id
-        ).first()
-        
-        if not session:
-            raise HTTPException(status_code=404, detail="Chat session not found")
-        
-        # Get session documents
-        documents = db.query(Document).filter(
-            Document.session_id == session_id,
-            Document.scope == DocumentScope.CHAT
-        ).order_by(Document.uploaded_at.desc()).all()
-        
-        return [DocumentResponse.model_validate(doc) for doc in documents]
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting session documents: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
 
-@router.delete("/documents/{document_id}")
-async def delete_document(
+@router.put("/{document_id}", response_model=DocumentUploadResponse)
+async def update_document(
     document_id: int,
-    current_user: UserResponse = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    update_data: DocumentUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
 ):
-    """Delete a document (uploader or class manager only)"""
+    """
+    Update document description.
+    """
     try:
-        from app.models import Document
-        
         document = db.query(Document).filter(Document.id == document_id).first()
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
         
-        # Check if user can delete this document
-        can_delete = False
+        # Check if user has access
+        membership = db.query(ClassMembership).filter(
+            ClassMembership.class_id == document.class_id,
+            ClassMembership.user_id == current_user.id
+        ).first()
         
-        # Uploader can always delete their own documents
-        if document.uploaded_by == current_user.id:
-            can_delete = True
-        else:
-            # Class managers can delete class documents
-            permission_service = PermissionService()
-            membership = await permission_service.get_user_membership(db, current_user.id, document.class_id)
-            if membership and membership.is_manager:
-                can_delete = True
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not authorized to update this document")
         
-        if not can_delete:
-            raise HTTPException(status_code=403, detail="Permission denied")
+        # Update description
+        if update_data.description is not None:
+            document.description = update_data.description
         
-        # Delete document and its chunks
-        document_service = DocumentService()
-        await document_service.delete_document(db, document_id)
+        db.commit()
+        db.refresh(document)
         
-        logger.info(f"Document deleted: {document.original_filename} by {current_user.username}")
-        return {"message": "Document deleted successfully"}
+        return DocumentUploadResponse(
+            id=document.id,
+            filename=document.filename,
+            original_filename=document.original_filename,
+            file_type=document.file_type,
+            file_size=document.file_size,
+            description=document.description,
+            url=document.url,
+            scope=document.scope.value,
+            class_id=document.class_id,
+            session_id=document.session_id,
+            uploaded_at=document.uploaded_at,
+            processing_status=document.processing_status.value
+        )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting document: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        db.rollback()
+        logger.error(f"Error updating document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update document")
+
+
+@router.delete("/{document_id}", status_code=204)
+async def delete_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Delete a document.
+    """
+    try:
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Check if user is owner of class or uploaded the document
+        class_obj = db.query(Class).filter(Class.id == document.class_id).first()
+        
+        if class_obj.owner_id != current_user.id and document.uploaded_by != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this document")
+        
+        db.delete(document)
+        db.commit()
+        
+        logger.info(f"Document {document_id} deleted by user {current_user.id}")
+        
+        return None
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete document")
+
+
+def _extract_youtube_id(url: str) -> str:
+    """Extract video ID from YouTube URL"""
+    if 'youtu.be/' in url:
+        return url.split('youtu.be/')[1].split('?')[0]
+    elif 'watch?v=' in url:
+        return url.split('watch?v=')[1].split('&')[0]
+    elif 'youtube.com/embed/' in url:
+        return url.split('embed/')[1].split('?')[0]
+    return url
+
 
