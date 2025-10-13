@@ -78,7 +78,7 @@
             
             <div v-if="sidebarExpanded" class="flex-1 min-w-0">
               <p class="text-sm font-medium truncate">{{ classItem.name }}</p>
-              <p class="text-xs text-gray-500">{{ classItem.chats?.length || 0 }} chats</p>
+              <p class="text-xs text-gray-500">{{ classItem.chat_session_count || 0 }} chats</p>
             </div>
             
             <div v-if="sidebarExpanded" class="flex space-x-1 opacity-0 group-hover:opacity-100">
@@ -164,20 +164,26 @@ const selectChat = (chat) => {
 }
 
 const openCreateClassModal = () => {
-  uiStore.openModal('CreateClassModal')
+  uiStore.openModal('ClassModal', { mode: 'create' })
 }
 
 const createNewChat = (classItem) => {
-  // This would typically create a new chat and select it
+  // PLACEHOLDER - Phase 4
   console.log('Creating new chat for class:', classItem.name)
+  alert('Chat creation coming in Phase 4!')
 }
 
 const openClassInfo = (classItem) => {
-  uiStore.openSlideOut('ClassInfoPanel', { classItem })
+  // Open ClassModal in edit mode
+  uiStore.openModal('ClassModal', { 
+    mode: 'edit', 
+    classId: classItem.id 
+  })
 }
 
 onMounted(() => {
   classStore.fetchClasses()
 })
 </script>
+
 

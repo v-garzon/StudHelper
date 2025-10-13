@@ -122,6 +122,8 @@ class Document(Base):
     file_path = Column(String, nullable=False)
     file_type = Column(String, nullable=False)
     file_size = Column(Integer, nullable=False)
+    description = Column(Text, nullable=True)      # ← NEW
+    url = Column(Text, nullable=True)              # ← NEW (for YouTube)
     
     # Dual-level document system
     scope = Column(Enum(DocumentScope), nullable=False)

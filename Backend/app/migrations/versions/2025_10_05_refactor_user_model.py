@@ -2,7 +2,7 @@
 
 Revision ID: refactor_user_model
 Revises: add_firebase_auth
-Create Date: 2025-01-15
+Create Date: 2025-10-05
 
 """
 from alembic import op

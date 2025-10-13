@@ -297,7 +297,7 @@ class FileExtractor:
         
         # Show directory structure
         print(f"\nDirectory structure:")
-        self._print_tree(self.dest_folder)
+        self._print_tree(self.dest_folder, max_depth=9)
         
         print("\nNext steps:")
         print("1. Review the created files")
@@ -312,7 +312,18 @@ class FileExtractor:
         if current_depth > max_depth:
             return
         
-        items = sorted([p for p in directory.iterdir() if not p.name.startswith('.')])
+        def _exclude(p: Path) -> bool:
+            if p.name == '__pycache__': return True
+            if p.name == 'venv': return True
+            if p.name == '.git': return True
+            if p.name == '.idea': return True
+            if p.name == '.vscode': return True
+            if p.name == 'node_modules': return True
+            if p.name == 'htmlcov': return True
+            if p.name == 'uploads': return True
+            return False
+            
+        items = sorted([p for p in directory.iterdir() if not _exclude(p)])
         
         for i, item in enumerate(items):
             is_last = i == len(items) - 1

@@ -1,0 +1,2901 @@
+# ============================================================================
+# CLASS MANAGEMENT SYSTEM - COMPLETE CODE IMPLEMENTATION
+# ============================================================================
+
+### NEW FILE: Backend/alembic/versions/add_document_descriptions.py
+"""add document descriptions
+
+Revision ID: add_descriptions_001
+Revises: refactor_user_model
+Create Date: 2025-10-10 10:00:00.000000
+
+"""
+from alembic import op
+import sqlalchemy as sa
+
+
+# revision identifiers, used by Alembic.
+revision = 'add_descriptions_001'
+down_revision = refactor_user_model  # Replace with your last migration ID
+branch_labels = None
+depends_on = None
+
+
+def upgrade():  
+    # Add description to documents table
+    op.add_column('documents', sa.Column('description', sa.Text(), nullable=True))
+    
+    # Add url field for YouTube videos
+    op.add_column('documents', sa.Column('url', sa.Text(), nullable=True))
+    
+    # Add indexes for better query performance
+    op.create_index('idx_documents_class_id', 'documents', ['class_id'])
+    op.create_index('idx_documents_session_id', 'documents', ['session_id'])
+
+
+def downgrade():
+    # Remove indexes
+    op.drop_index('idx_documents_session_id', table_name='documents')
+    op.drop_index('idx_documents_class_id', table_name='documents')
+    
+    # Remove columns
+    op.drop_column('documents', 'url')
+    op.drop_column('documents', 'description')
+
+
+### NEW FILE: Backend/app/schemas/class_schemas.py
+from pydantic import BaseModel, Field
+from typing import Optional, List
+from datetime import datetime
+
+
+class ClassCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+
+
+class ClassUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = None
+
+
+class DocumentSummary(BaseModel):
+    id: int
+    filename: str
+    original_filename: str
+    file_type: str
+    file_size: int
+    description: Optional[str]
+    url: Optional[str]
+    uploaded_at: datetime
+    processing_status: str
+    
+    class Config:
+        from_attributes = True
+
+
+class ClassResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str]
+    class_code: str
+    owner_id: int
+    created_at: datetime
+    is_owner: bool = False
+    chat_session_count: int = 0
+    document_count: int = 0
+    member_count: int = 0
+    
+    class Config:
+        from_attributes = True
+
+
+class ClassDetailResponse(ClassResponse):
+    documents: List[DocumentSummary] = []
+    
+    class Config:
+        from_attributes = True
+
+
+class ClassListResponse(BaseModel):
+    classes: List[ClassResponse]
+
+
+### NEW FILE: Backend/app/schemas/document_schemas.py
+from pydantic import BaseModel, Field, HttpUrl
+from typing import Optional
+from datetime import datetime
+
+
+class DocumentUploadResponse(BaseModel):
+    id: int
+    filename: str
+    original_filename: str
+    file_type: str
+    file_size: int
+    description: Optional[str]
+    url: Optional[str]
+    scope: str
+    class_id: int
+    session_id: Optional[int]
+    uploaded_at: datetime
+    processing_status: str
+    
+    class Config:
+        from_attributes = True
+
+
+class DocumentUpdateRequest(BaseModel):
+    description: Optional[str] = None
+
+
+class DocumentListResponse(BaseModel):
+    documents: List[DocumentUploadResponse]
+
+
+class YouTubeVideoRequest(BaseModel):
+    url: HttpUrl
+    description: Optional[str] = None
+
+
+### NEW FILE: Backend/app/services/class_service.py
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from fastapi import HTTPException, UploadFile
+from app.models import Class, ClassMembership, Document, DocumentScope, User, ChatSession
+from app.schemas.class_schemas import ClassCreate, ClassUpdate, ClassResponse, ClassDetailResponse
+from typing import List, Optional, Dict
+import random
+import string
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class ClassService:
+    
+    @staticmethod
+    def generate_class_code() -> str:
+        """Generate unique 8-character class code"""
+        return ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+    
+    @staticmethod
+    async def create_class(
+        db: Session,
+        name: str,
+        description: Optional[str],
+        owner_id: int,
+        files: Optional[List[UploadFile]] = None,
+        file_descriptions: Optional[Dict[str, str]] = None,
+        youtube_urls: Optional[List[str]] = None,
+        youtube_descriptions: Optional[List[str]] = None
+    ) -> ClassDetailResponse:
+        """Create new class with optional documents"""
+        
+        try:
+            # 1. Generate unique class code
+            max_attempts = 10
+            class_code = None
+            for _ in range(max_attempts):
+                potential_code = ClassService.generate_class_code()
+                existing = db.query(Class).filter(Class.class_code == potential_code).first()
+                if not existing:
+                    class_code = potential_code
+                    break
+            
+            if not class_code:
+                raise HTTPException(status_code=500, detail="Failed to generate unique class code")
+            
+            # 2. Create class
+            new_class = Class(
+                name=name,
+                description=description,
+                class_code=class_code,
+                owner_id=owner_id
+            )
+            db.add(new_class)
+            db.flush()
+            
+            logger.info(f"Created class {new_class.id} with code {class_code}")
+            
+            # 3. Create owner membership
+            owner_membership = ClassMembership(
+                user_id=owner_id,
+                class_id=new_class.id,
+                is_manager=True,
+                can_chat=True,
+                daily_token_limit=100000,
+                is_sponsored=True
+            )
+            db.add(owner_membership)
+            
+            # 4. Process file uploads (placeholder - full implementation in Phase 3)
+            documents = []
+            if files:
+                for file in files:
+                    description = file_descriptions.get(file.filename, '') if file_descriptions else ''
+                    
+                    # Simple file validation
+                    if file.size > 10 * 1024 * 1024:  # 10MB limit
+                        logger.warning(f"File {file.filename} exceeds size limit")
+                        continue
+                    
+                    document = Document(
+                        filename=file.filename,
+                        original_filename=file.filename,
+                        file_path=f"uploads/{new_class.id}/{file.filename}",
+                        file_type=file.filename.split('.')[-1].lower() if '.' in file.filename else 'unknown',
+                        file_size=file.size or 0,
+                        description=description,
+                        scope=DocumentScope.CLASS,
+                        class_id=new_class.id,
+                        uploaded_by=owner_id
+                    )
+                    db.add(document)
+                    documents.append(document)
+                    
+                    logger.info(f"Added document {file.filename} to class {new_class.id}")
+            
+            # 5. Process YouTube videos
+            if youtube_urls:
+                for i, url in enumerate(youtube_urls):
+                    description = youtube_descriptions[i] if youtube_descriptions and i < len(youtube_descriptions) else ''
+                    video_id = ClassService._extract_youtube_id(url)
+                    
+                    document = Document(
+                        filename=f"YouTube: {video_id}",
+                        original_filename=url,
+                        file_path="",
+                        file_type="youtube",
+                        file_size=0,
+                        description=description,
+                        url=url,
+                        scope=DocumentScope.CLASS,
+                        class_id=new_class.id,
+                        uploaded_by=owner_id
+                    )
+                    db.add(document)
+                    documents.append(document)
+                    
+                    logger.info(f"Added YouTube video {video_id} to class {new_class.id}")
+            
+            db.commit()
+            db.refresh(new_class)
+            
+            # Refresh documents to get IDs
+            for doc in documents:
+                db.refresh(doc)
+            
+            # Build response
+            response = ClassDetailResponse(
+                id=new_class.id,
+                name=new_class.name,
+                description=new_class.description,
+                class_code=new_class.class_code,
+                owner_id=new_class.owner_id,
+                created_at=new_class.created_at,
+                is_owner=True,
+                chat_session_count=0,
+                document_count=len(documents),
+                member_count=1,
+                documents=[
+                    {
+                        "id": doc.id,
+                        "filename": doc.filename,
+                        "original_filename": doc.original_filename,
+                        "file_type": doc.file_type,
+                        "file_size": doc.file_size,
+                        "description": doc.description,
+                        "url": doc.url,
+                        "uploaded_at": doc.uploaded_at,
+                        "processing_status": doc.processing_status.value
+                    }
+                    for doc in documents
+                ]
+            )
+            
+            return response
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error creating class: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to create class: {str(e)}")
+    
+    @staticmethod
+    def get_user_classes(db: Session, user_id: int) -> List[ClassResponse]:
+        """Get all classes user is member of"""
+        
+        try:
+            # Get memberships
+            memberships = db.query(ClassMembership).filter(
+                ClassMembership.user_id == user_id
+            ).all()
+            
+            classes = []
+            for membership in memberships:
+                class_obj = db.query(Class).filter(Class.id == membership.class_id).first()
+                if not class_obj:
+                    continue
+                
+                # Count chat sessions
+                chat_count = db.query(func.count(ChatSession.id)).filter(
+                    ChatSession.class_id == class_obj.id
+                ).scalar() or 0
+                
+                # Count documents
+                doc_count = db.query(func.count(Document.id)).filter(
+                    Document.class_id == class_obj.id,
+                    Document.scope == DocumentScope.CLASS
+                ).scalar() or 0
+                
+                # Count members
+                member_count = db.query(func.count(ClassMembership.id)).filter(
+                    ClassMembership.class_id == class_obj.id
+                ).scalar() or 0
+                
+                class_response = ClassResponse(
+                    id=class_obj.id,
+                    name=class_obj.name,
+                    description=class_obj.description,
+                    class_code=class_obj.class_code,
+                    owner_id=class_obj.owner_id,
+                    created_at=class_obj.created_at,
+                    is_owner=class_obj.owner_id == user_id,
+                    chat_session_count=chat_count,
+                    document_count=doc_count,
+                    member_count=member_count
+                )
+                classes.append(class_response)
+            
+            return classes
+            
+        except Exception as e:
+            logger.error(f"Error fetching user classes: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to fetch classes")
+    
+    @staticmethod
+    def get_class_details(db: Session, class_id: int, user_id: int) -> ClassDetailResponse:
+        """Get detailed class information with documents"""
+        
+        try:
+            class_obj = db.query(Class).filter(Class.id == class_id).first()
+            if not class_obj:
+                raise HTTPException(status_code=404, detail="Class not found")
+            
+            # Check membership
+            membership = db.query(ClassMembership).filter(
+                ClassMembership.class_id == class_id,
+                ClassMembership.user_id == user_id
+            ).first()
+            
+            if not membership:
+                raise HTTPException(status_code=403, detail="Not a member of this class")
+            
+            # Get documents
+            documents = db.query(Document).filter(
+                Document.class_id == class_id,
+                Document.scope == DocumentScope.CLASS
+            ).order_by(Document.uploaded_at.desc()).all()
+            
+            # Count sessions and members
+            chat_count = db.query(func.count(ChatSession.id)).filter(
+                ChatSession.class_id == class_id
+            ).scalar() or 0
+            
+            member_count = db.query(func.count(ClassMembership.id)).filter(
+                ClassMembership.class_id == class_id
+            ).scalar() or 0
+            
+            response = ClassDetailResponse(
+                id=class_obj.id,
+                name=class_obj.name,
+                description=class_obj.description,
+                class_code=class_obj.class_code,
+                owner_id=class_obj.owner_id,
+                created_at=class_obj.created_at,
+                is_owner=class_obj.owner_id == user_id,
+                chat_session_count=chat_count,
+                document_count=len(documents),
+                member_count=member_count,
+                documents=[
+                    {
+                        "id": doc.id,
+                        "filename": doc.filename,
+                        "original_filename": doc.original_filename,
+                        "file_type": doc.file_type,
+                        "file_size": doc.file_size,
+                        "description": doc.description,
+                        "url": doc.url,
+                        "uploaded_at": doc.uploaded_at,
+                        "processing_status": doc.processing_status.value
+                    }
+                    for doc in documents
+                ]
+            )
+            
+            return response
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error fetching class details: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to fetch class details")
+    
+    @staticmethod
+    def update_class(
+        db: Session,
+        class_id: int,
+        user_id: int,
+        name: Optional[str] = None,
+        description: Optional[str] = None
+    ) -> ClassResponse:
+        """Update class information (owner only)"""
+        
+        try:
+            class_obj = db.query(Class).filter(Class.id == class_id).first()
+            if not class_obj:
+                raise HTTPException(status_code=404, detail="Class not found")
+            
+            if class_obj.owner_id != user_id:
+                raise HTTPException(status_code=403, detail="Only owner can update class")
+            
+            if name is not None:
+                class_obj.name = name
+            if description is not None:
+                class_obj.description = description
+            
+            db.commit()
+            db.refresh(class_obj)
+            
+            # Get counts for response
+            chat_count = db.query(func.count(ChatSession.id)).filter(
+                ChatSession.class_id == class_id
+            ).scalar() or 0
+            
+            doc_count = db.query(func.count(Document.id)).filter(
+                Document.class_id == class_id,
+                Document.scope == DocumentScope.CLASS
+            ).scalar() or 0
+            
+            member_count = db.query(func.count(ClassMembership.id)).filter(
+                ClassMembership.class_id == class_id
+            ).scalar() or 0
+            
+            return ClassResponse(
+                id=class_obj.id,
+                name=class_obj.name,
+                description=class_obj.description,
+                class_code=class_obj.class_code,
+                owner_id=class_obj.owner_id,
+                created_at=class_obj.created_at,
+                is_owner=True,
+                chat_session_count=chat_count,
+                document_count=doc_count,
+                member_count=member_count
+            )
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error updating class: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to update class")
+    
+    @staticmethod
+    def delete_class(db: Session, class_id: int, user_id: int):
+        """Delete class and all related data (owner only)"""
+        
+        try:
+            class_obj = db.query(Class).filter(Class.id == class_id).first()
+            if not class_obj:
+                raise HTTPException(status_code=404, detail="Class not found")
+            
+            if class_obj.owner_id != user_id:
+                raise HTTPException(status_code=403, detail="Only owner can delete class")
+            
+            logger.info(f"Deleting class {class_id} by user {user_id}")
+            
+            # Delete all related records (CASCADE should handle most)
+            # But we'll be explicit for important ones
+            
+            # Delete documents
+            db.query(Document).filter(Document.class_id == class_id).delete()
+            
+            # Delete memberships
+            db.query(ClassMembership).filter(ClassMembership.class_id == class_id).delete()
+            
+            # Delete chat sessions (and CASCADE will handle messages)
+            db.query(ChatSession).filter(ChatSession.class_id == class_id).delete()
+            
+            # Delete class
+            db.delete(class_obj)
+            
+            db.commit()
+            
+            logger.info(f"Successfully deleted class {class_id}")
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Error deleting class: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to delete class")
+    
+    @staticmethod
+    def _extract_youtube_id(url: str) -> str:
+        """Extract video ID from YouTube URL"""
+        if 'youtu.be/' in url:
+            return url.split('youtu.be/')[1].split('?')[0]
+        elif 'watch?v=' in url:
+            return url.split('watch?v=')[1].split('&')[0]
+        elif 'youtube.com/embed/' in url:
+            return url.split('embed/')[1].split('?')[0]
+        return url
+
+
+### NEW FILE: Backend/app/routes/classes.py
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from sqlalchemy.orm import Session
+from typing import List, Optional, Dict
+from app.database import get_db
+from app.services.class_service import ClassService
+from app.schemas.class_schemas import (
+    ClassCreate,
+    ClassUpdate,
+    ClassResponse,
+    ClassDetailResponse,
+    ClassListResponse
+)
+from app.utils.security import get_current_user
+from app.schemas import UserResponse
+import json
+import logging
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+
+@router.post("", response_model=ClassDetailResponse, status_code=201)
+async def create_class(
+    name: str = Form(...),
+    description: Optional[str] = Form(None),
+    files: Optional[List[UploadFile]] = File(None),
+    file_descriptions: Optional[str] = Form(None),  # JSON string
+    youtube_urls: Optional[str] = Form(None),  # JSON string
+    youtube_descriptions: Optional[str] = Form(None),  # JSON string
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Create a new class with optional documents.
+    
+    - **name**: Class name (required)
+    - **description**: Class description (optional)
+    - **files**: Upload files (optional, multiple)
+    - **file_descriptions**: JSON object mapping filenames to descriptions
+    - **youtube_urls**: JSON array of YouTube URLs
+    - **youtube_descriptions**: JSON array of descriptions for YouTube videos
+    """
+    try:
+        # Parse JSON strings
+        file_desc_dict = json.loads(file_descriptions) if file_descriptions else {}
+        youtube_url_list = json.loads(youtube_urls) if youtube_urls else []
+        youtube_desc_list = json.loads(youtube_descriptions) if youtube_descriptions else []
+        
+        new_class = await ClassService.create_class(
+            db=db,
+            name=name,
+            description=description,
+            owner_id=current_user.id,
+            files=files,
+            file_descriptions=file_desc_dict,
+            youtube_urls=youtube_url_list,
+            youtube_descriptions=youtube_desc_list
+        )
+        
+        return new_class
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"Invalid JSON in form data: {str(e)}")
+        raise HTTPException(status_code=400, detail="Invalid JSON format in form data")
+    except Exception as e:
+        logger.error(f"Error creating class: {str(e)}")
+        raise
+
+
+@router.get("", response_model=ClassListResponse)
+async def get_classes(
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Get all classes the current user is a member of.
+    
+    Returns list of classes with basic info and counts.
+    """
+    classes = ClassService.get_user_classes(db, current_user.id)
+    return ClassListResponse(classes=classes)
+
+
+@router.get("/{class_id}", response_model=ClassDetailResponse)
+async def get_class_details(
+    class_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Get detailed information about a specific class.
+    
+    Includes documents, member count, and session count.
+    """
+    return ClassService.get_class_details(db, class_id, current_user.id)
+
+
+@router.put("/{class_id}", response_model=ClassResponse)
+async def update_class(
+    class_id: int,
+    class_update: ClassUpdate,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Update class information (owner only).
+    
+    Can update name and/or description.
+    """
+    return ClassService.update_class(
+        db=db,
+        class_id=class_id,
+        user_id=current_user.id,
+        name=class_update.name,
+        description=class_update.description
+    )
+
+
+@router.delete("/{class_id}", status_code=204)
+async def delete_class(
+    class_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Delete a class and all related data (owner only).
+    
+    This will delete:
+    - The class itself
+    - All documents
+    - All memberships
+    - All chat sessions and messages
+    """
+    ClassService.delete_class(db, class_id, current_user.id)
+    return None
+
+
+### MODIFIED FILE: Backend/app/routes/documents.py
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from sqlalchemy.orm import Session
+from typing import Optional
+from app.database import get_db
+from app.models import Document, DocumentScope, Class, ClassMembership, ChatSession
+from app.schemas.document_schemas import (
+    DocumentUploadResponse,
+    DocumentUpdateRequest,
+    DocumentListResponse,
+    YouTubeVideoRequest
+)
+from app.utils.security import get_current_user
+from app.schemas import UserResponse
+import logging
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+
+@router.post("/classes/{class_id}/upload", response_model=DocumentUploadResponse, status_code=201)
+async def upload_class_document(
+    class_id: int,
+    file: UploadFile = File(...),
+    description: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Upload a document to a class.
+    
+    PLACEHOLDER: File processing will be implemented in Phase 3.
+    Currently just creates database record.
+    """
+    try:
+        # Check if class exists
+        class_obj = db.query(Class).filter(Class.id == class_id).first()
+        if not class_obj:
+            raise HTTPException(status_code=404, detail="Class not found")
+        
+        # Check if user is member
+        membership = db.query(ClassMembership).filter(
+            ClassMembership.class_id == class_id,
+            ClassMembership.user_id == current_user.id
+        ).first()
+        
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this class")
+        
+        # Validate file size (10MB limit)
+        if file.size and file.size > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="File size exceeds 10MB limit")
+        
+        # Create document record
+        document = Document(
+            filename=file.filename,
+            original_filename=file.filename,
+            file_path=f"uploads/{class_id}/{file.filename}",  # PLACEHOLDER
+            file_type=file.filename.split('.')[-1].lower() if '.' in file.filename else 'unknown',
+            file_size=file.size or 0,
+            description=description,
+            scope=DocumentScope.CLASS,
+            class_id=class_id,
+            uploaded_by=current_user.id
+        )
+        
+        db.add(document)
+        db.commit()
+        db.refresh(document)
+        
+        logger.info(f"Document {document.id} uploaded to class {class_id} by user {current_user.id}")
+        
+        return DocumentUploadResponse(
+            id=document.id,
+            filename=document.filename,
+            original_filename=document.original_filename,
+            file_type=document.file_type,
+            file_size=document.file_size,
+            description=document.description,
+            url=document.url,
+            scope=document.scope.value,
+            class_id=document.class_id,
+            session_id=document.session_id,
+            uploaded_at=document.uploaded_at,
+            processing_status=document.processing_status.value
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error uploading document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to upload document")
+
+
+@router.post("/classes/{class_id}/upload-youtube", response_model=DocumentUploadResponse, status_code=201)
+async def upload_youtube_video(
+    class_id: int,
+    video: YouTubeVideoRequest,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Add a YouTube video to a class.
+    
+    PLACEHOLDER: Video processing will be implemented in Phase 3.
+    """
+    try:
+        # Check if class exists
+        class_obj = db.query(Class).filter(Class.id == class_id).first()
+        if not class_obj:
+            raise HTTPException(status_code=404, detail="Class not found")
+        
+        # Check if user is member
+        membership = db.query(ClassMembership).filter(
+            ClassMembership.class_id == class_id,
+            ClassMembership.user_id == current_user.id
+        ).first()
+        
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this class")
+        
+        # Extract video ID
+        video_url = str(video.url)
+        video_id = _extract_youtube_id(video_url)
+        
+        # Create document record
+        document = Document(
+            filename=f"YouTube: {video_id}",
+            original_filename=video_url,
+            file_path="",
+            file_type="youtube",
+            file_size=0,
+            description=video.description,
+            url=video_url,
+            scope=DocumentScope.CLASS,
+            class_id=class_id,
+            uploaded_by=current_user.id
+        )
+        
+        db.add(document)
+        db.commit()
+        db.refresh(document)
+        
+        logger.info(f"YouTube video {video_id} added to class {class_id} by user {current_user.id}")
+        
+        return DocumentUploadResponse(
+            id=document.id,
+            filename=document.filename,
+            original_filename=document.original_filename,
+            file_type=document.file_type,
+            file_size=document.file_size,
+            description=document.description,
+            url=document.url,
+            scope=document.scope.value,
+            class_id=document.class_id,
+            session_id=document.session_id,
+            uploaded_at=document.uploaded_at,
+            processing_status=document.processing_status.value
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error adding YouTube video: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to add YouTube video")
+
+
+@router.get("/classes/{class_id}", response_model=DocumentListResponse)
+async def get_class_documents(
+    class_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Get all documents for a class.
+    """
+    try:
+        # Check if user is member
+        membership = db.query(ClassMembership).filter(
+            ClassMembership.class_id == class_id,
+            ClassMembership.user_id == current_user.id
+        ).first()
+        
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not a member of this class")
+        
+        documents = db.query(Document).filter(
+            Document.class_id == class_id,
+            Document.scope == DocumentScope.CLASS
+        ).order_by(Document.uploaded_at.desc()).all()
+        
+        return DocumentListResponse(
+            documents=[
+                DocumentUploadResponse(
+                    id=doc.id,
+                    filename=doc.filename,
+                    original_filename=doc.original_filename,
+                    file_type=doc.file_type,
+                    file_size=doc.file_size,
+                    description=doc.description,
+                    url=doc.url,
+                    scope=doc.scope.value,
+                    class_id=doc.class_id,
+                    session_id=doc.session_id,
+                    uploaded_at=doc.uploaded_at,
+                    processing_status=doc.processing_status.value
+                )
+                for doc in documents
+            ]
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching documents: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to fetch documents")
+
+
+@router.put("/{document_id}", response_model=DocumentUploadResponse)
+async def update_document(
+    document_id: int,
+    update_data: DocumentUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Update document description.
+    """
+    try:
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Check if user has access
+        membership = db.query(ClassMembership).filter(
+            ClassMembership.class_id == document.class_id,
+            ClassMembership.user_id == current_user.id
+        ).first()
+        
+        if not membership:
+            raise HTTPException(status_code=403, detail="Not authorized to update this document")
+        
+        # Update description
+        if update_data.description is not None:
+            document.description = update_data.description
+        
+        db.commit()
+        db.refresh(document)
+        
+        return DocumentUploadResponse(
+            id=document.id,
+            filename=document.filename,
+            original_filename=document.original_filename,
+            file_type=document.file_type,
+            file_size=document.file_size,
+            description=document.description,
+            url=document.url,
+            scope=document.scope.value,
+            class_id=document.class_id,
+            session_id=document.session_id,
+            uploaded_at=document.uploaded_at,
+            processing_status=document.processing_status.value
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to update document")
+
+
+@router.delete("/{document_id}", status_code=204)
+async def delete_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserResponse = Depends(get_current_user)
+):
+    """
+    Delete a document.
+    """
+    try:
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Check if user is owner of class or uploaded the document
+        class_obj = db.query(Class).filter(Class.id == document.class_id).first()
+        
+        if class_obj.owner_id != current_user.id and document.uploaded_by != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this document")
+        
+        db.delete(document)
+        db.commit()
+        
+        logger.info(f"Document {document_id} deleted by user {current_user.id}")
+        
+        return None
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting document: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to delete document")
+
+
+def _extract_youtube_id(url: str) -> str:
+    """Extract video ID from YouTube URL"""
+    if 'youtu.be/' in url:
+        return url.split('youtu.be/')[1].split('?')[0]
+    elif 'watch?v=' in url:
+        return url.split('watch?v=')[1].split('&')[0]
+    elif 'youtube.com/embed/' in url:
+        return url.split('embed/')[1].split('?')[0]
+    return url
+
+
+### MODIFIED FILE: Backend/app/main.py
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.config import get_settings
+from app.database import create_tables
+from app.routes import auth, classes, documents
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+settings = get_settings()
+
+app = FastAPI(
+    title="StudHelper API",
+    description="Class-based AI learning platform API",
+    version="1.0.0"
+)
+
+# CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Create database tables
+create_tables()
+
+# Include routers
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+app.include_router(classes.router, prefix="/api/v1/classes", tags=["Classes"])
+app.include_router(documents.router, prefix="/api/v1/documents", tags=["Documents"])
+
+
+@app.get("/")
+async def root():
+    return {"message": "StudHelper API", "version": "1.0.0"}
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+
+# ============================================================================
+# FRONTEND FILES
+# ============================================================================
+
+
+### NEW FILE: Vue-Frontend/src/services/classService.js
+import api from './api'
+
+const classService = {
+  /**
+   * Create a new class with optional files and YouTube videos
+   */
+  async createClass(formData) {
+    const response = await api.post('/classes', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+    return response.data
+  },
+
+  /**
+   * Get all classes for current user
+   */
+  async getClasses() {
+    const response = await api.get('/classes')
+    return response.data
+  },
+
+  /**
+   * Get detailed information about a class
+   */
+  async getClassDetails(classId) {
+    const response = await api.get(`/classes/${classId}`)
+    return response.data
+  },
+
+  /**
+   * Update class information
+   */
+  async updateClass(classId, data) {
+    const response = await api.put(`/classes/${classId}`, data)
+    return response.data
+  },
+
+  /**
+   * Delete a class
+   */
+  async deleteClass(classId) {
+    await api.delete(`/classes/${classId}`)
+  },
+
+  /**
+   * Upload document to class
+   */
+  async uploadDocument(classId, file, description) {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (description) {
+      formData.append('description', description)
+    }
+
+    const response = await api.post(`/documents/classes/${classId}/upload`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+    return response.data
+  },
+
+  /**
+   * Upload YouTube video to class
+   */
+  async uploadYouTubeVideo(classId, url, description) {
+    const response = await api.post(`/documents/classes/${classId}/upload-youtube`, {
+      url,
+      description
+    })
+    return response.data
+  },
+
+  /**
+   * Get documents for a class
+   */
+  async getClassDocuments(classId) {
+    const response = await api.get(`/documents/classes/${classId}`)
+    return response.data
+  },
+
+  /**
+   * Update document description
+   */
+  async updateDocument(documentId, description) {
+    const response = await api.put(`/documents/${documentId}`, {
+      description
+    })
+    return response.data
+  },
+
+  /**
+   * Delete a document
+   */
+  async deleteDocument(documentId) {
+    await api.delete(`/documents/${documentId}`)
+  }
+}
+
+export default classService
+
+
+### MODIFIED FILE: Vue-Frontend/src/stores/classes.js
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+import classService from '@/services/classService'
+
+export const useClassStore = defineStore('classes', () => {
+  // ==========================================
+  // STATE
+  // ==========================================
+  
+  const classes = ref([])
+  const selectedClass = ref(null)
+  const currentChat = ref(null)
+  const isLoading = ref(false)
+  const error = ref(null)
+  
+  // Upload management
+  const uploadQueue = ref([])
+  
+  // ==========================================
+  // GETTERS
+  // ==========================================
+  
+  const hasClasses = computed(() => classes.value.length > 0)
+  
+  const selectedClassId = computed(() => {
+    return selectedClass.value?.id || parseInt(localStorage.getItem('selectedClassId'))
+  })
+  
+  // ==========================================
+  // ACTIONS
+  // ==========================================
+  
+  /**
+   * Fetch all classes for current user
+   */
+  async function fetchClasses() {
+    isLoading.value = true
+    error.value = null
+    
+    try {
+      const response = await classService.getClasses()
+      classes.value = response.classes
+      
+      // Auto-select from localStorage
+      const savedId = localStorage.getItem('selectedClassId')
+      if (savedId) {
+        const savedClass = classes.value.find(c => c.id === parseInt(savedId))
+        if (savedClass) {
+          selectedClass.value = savedClass
+        } else {
+          // Clear invalid selection
+          localStorage.removeItem('selectedClassId')
+        }
+      }
+    } catch (err) {
+      error.value = err.response?.data?.detail || err.message
+      console.error('Failed to fetch classes:', err)
+    } finally {
+      isLoading.value = false
+    }
+  }
+  
+  /**
+   * Create new class with files
+   */
+  async function createClass(classData) {
+    isLoading.value = true
+    error.value = null
+    
+    try {
+      const formData = new FormData()
+      formData.append('name', classData.name)
+      formData.append('description', classData.description || '')
+      
+      // Prepare file descriptions as JSON
+      const fileDescriptions = {}
+      classData.files.forEach(fileObj => {
+        if (fileObj.description) {
+          fileDescriptions[fileObj.file.name] = fileObj.description
+        }
+      })
+      
+      // Add files
+      classData.files.forEach(fileObj => {
+        formData.append('files', fileObj.file)
+      })
+      
+      // Add file descriptions as JSON string
+      if (Object.keys(fileDescriptions).length > 0) {
+        formData.append('file_descriptions', JSON.stringify(fileDescriptions))
+      }
+      
+      // Add YouTube videos
+      if (classData.youtubeVideos?.length) {
+        const urls = classData.youtubeVideos.map(v => v.url)
+        const descriptions = classData.youtubeVideos.map(v => v.description || '')
+        
+        formData.append('youtube_urls', JSON.stringify(urls))
+        formData.append('youtube_descriptions', JSON.stringify(descriptions))
+      }
+      
+      const newClass = await classService.createClass(formData)
+      
+      // Add to classes list
+      classes.value.push(newClass)
+      
+      // Auto-select new class
+      selectClass(newClass)
+      
+      return newClass
+    } catch (err) {
+      error.value = err.response?.data?.detail || err.message
+      throw err
+    } finally {
+      isLoading.value = false
+    }
+  }
+  
+  /**
+   * Fetch detailed class information
+   */
+  async function fetchClassDetails(classId) {
+    isLoading.value = true
+    error.value = null
+    
+    try {
+      const classDetails = await classService.getClassDetails(classId)
+      
+      // Update in list if exists
+      const index = classes.value.findIndex(c => c.id === classId)
+      if (index !== -1) {
+        classes.value[index] = classDetails
+      }
+      
+      // Update selected class if it's the current one
+      if (selectedClass.value?.id === classId) {
+        selectedClass.value = classDetails
+      }
+      
+      return classDetails
+    } catch (err) {
+      error.value = err.response?.data?.detail || err.message
+      throw err
+    } finally {
+      isLoading.value = false
+    }
+  }
+  
+  /**
+   * Update class info
+   */
+  async function updateClass(classId, updates) {
+    isLoading.value = true
+    error.value = null
+    
+    try {
+      const updatedClass = await classService.updateClass(classId, updates)
+      
+      // Update in list
+      const index = classes.value.findIndex(c => c.id === classId)
+      if (index !== -1) {
+        classes.value[index] = { ...classes.value[index], ...updatedClass }
+      }
+      
+      // Update selected if it's the current class
+      if (selectedClass.value?.id === classId) {
+        selectedClass.value = { ...selectedClass.value, ...updatedClass }
+      }
+      
+      return updatedClass
+    } catch (err) {
+      error.value = err.response?.data?.detail || err.message
+      throw err
+    } finally {
+      isLoading.value = false
+    }
+  }
+  
+  /**
+   * Delete class
+   */
+  async function deleteClass(classId) {
+    isLoading.value = true
+    error.value = null
+    
+    try {
+      await classService.deleteClass(classId)
+      
+      // Remove from list
+      classes.value = classes.value.filter(c => c.id !== classId)
+      
+      // Clear selection if deleted class was selected
+      if (selectedClass.value?.id === classId) {
+        selectedClass.value = null
+        localStorage.removeItem('selectedClassId')
+      }
+    } catch (err) {
+      error.value = err.response?.data?.detail || err.message
+      throw err
+    } finally {
+      isLoading.value = false
+    }
+  }
+  
+  /**
+   * Upload document to class
+   */
+  async function uploadDocument(classId, file, description) {
+    try {
+      const document = await classService.uploadDocument(classId, file, description)
+      
+      // Refresh class details to get updated document list
+      await fetchClassDetails(classId)
+      
+      return document
+    } catch (err) {
+      error.value = err.response?.data?.detail || err.message
+      throw err
+    }
+  }
+  
+  /**
+   * Upload YouTube video to class
+   */
+  async function uploadYouTubeVideo(classId, url, description) {
+    try {
+      const document = await classService.uploadYouTubeVideo(classId, url, description)
+      
+      // Refresh class details
+      await fetchClassDetails(classId)
+      
+      return document
+    } catch (err) {
+      error.value = err.response?.data?.detail || err.message
+      throw err
+    }
+  }
+  
+  /**
+   * Update document description
+   */
+  async function updateDocumentDescription(documentId, description) {
+    try {
+      await classService.updateDocument(documentId, description)
+      
+      // Refresh current class details if selected
+      if (selectedClass.value) {
+        await fetchClassDetails(selectedClass.value.id)
+      }
+    } catch (err) {
+      error.value = err.response?.data?.detail || err.message
+      throw err
+    }
+  }
+  
+  /**
+   * Delete document
+   */
+  async function deleteDocument(documentId) {
+    try {
+      await classService.deleteDocument(documentId)
+      
+      // Refresh current class details
+      if (selectedClass.value) {
+        await fetchClassDetails(selectedClass.value.id)
+      }
+    } catch (err) {
+      error.value = err.response?.data?.detail || err.message
+      throw err
+    }
+  }
+  
+  /**
+   * Select a class
+   */
+  function selectClass(classItem) {
+    selectedClass.value = classItem
+    currentChat.value = null // Clear chat when switching classes
+    localStorage.setItem('selectedClassId', classItem.id.toString())
+  }
+  
+  /**
+   * Clear class selection
+   */
+  function clearClassSelection() {
+    selectedClass.value = null
+    currentChat.value = null
+    localStorage.removeItem('selectedClassId')
+  }
+  
+  /**
+   * Select a chat (placeholder for Phase 4)
+   */
+  function selectChat(chat) {
+    currentChat.value = chat
+  }
+  
+  /**
+   * Add file to upload queue
+   */
+  function addToUploadQueue(file, description = '') {
+    const fileObj = {
+      id: Date.now() + Math.random(),
+      file,
+      description,
+      status: 'new', // 'new' | 'modified' | 'deleted'
+      isExisting: false
+    }
+    uploadQueue.value.push(fileObj)
+    return fileObj
+  }
+  
+  /**
+   * Add existing document to queue (for edit mode)
+   */
+  function addExistingToQueue(document) {
+    const fileObj = {
+      id: document.id,
+      filename: document.filename,
+      file_size: document.file_size,
+      file_type: document.file_type,
+      description: document.description || '',
+      url: document.url,
+      status: 'existing',
+      isExisting: true,
+      originalDescription: document.description || ''
+    }
+    uploadQueue.value.push(fileObj)
+    return fileObj
+  }
+  
+  /**
+   * Remove file from upload queue
+   */
+  function removeFromUploadQueue(fileId) {
+    const file = uploadQueue.value.find(f => f.id === fileId)
+    
+    if (file?.isExisting) {
+      // Mark existing file as deleted
+      file.status = 'deleted'
+    } else {
+      // Remove new file completely
+      uploadQueue.value = uploadQueue.value.filter(f => f.id !== fileId)
+    }
+  }
+  
+  /**
+   * Update file description in queue
+   */
+  function updateFileDescription(fileId, description) {
+    const file = uploadQueue.value.find(f => f.id === fileId)
+    if (file) {
+      file.description = description
+      
+      // Mark as modified if existing file and description changed
+      if (file.isExisting && description !== file.originalDescription) {
+        file.status = 'modified'
+      }
+    }
+  }
+  
+  /**
+   * Clear upload queue
+   */
+  function clearUploadQueue() {
+    uploadQueue.value = []
+  }
+  
+  return {
+    // State
+    classes,
+    selectedClass,
+    currentChat,
+    isLoading,
+    error,
+    uploadQueue,
+    
+    // Getters
+    hasClasses,
+    selectedClassId,
+    
+    // Actions
+    fetchClasses,
+    createClass,
+    fetchClassDetails,
+    updateClass,
+    deleteClass,
+    uploadDocument,
+    uploadYouTubeVideo,
+    updateDocumentDescription,
+    deleteDocument,
+    selectClass,
+    clearClassSelection,
+    selectChat,
+    addToUploadQueue,
+    addExistingToQueue,
+    removeFromUploadQueue,
+    updateFileDescription,
+    clearUploadQueue
+  }
+})
+
+
+### NEW FILE: Vue-Frontend/src/components/features/class-management/modals/ClassModal.vue
+<template>
+  <ModalWrapper @close="handleClose">
+    <div class="modal-content max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+      <!-- Header -->
+      <div class="modal-header px-6 py-4 border-b border-gray-200">
+        <h2 class="text-2xl font-semibold text-gray-900">
+          {{ isEditMode ? 'Edit Class' : 'Create New Class' }}
+        </h2>
+      </div>
+
+      <!-- Content -->
+      <div class="modal-body px-6 py-4 space-y-6">
+        <!-- Class Info Form -->
+        <ClassInfoForm 
+          v-model:name="classData.name"
+          v-model:description="classData.description"
+          :errors="validationErrors"
+        />
+
+        <!-- Knowledge Manager -->
+        <KnowledgeManager 
+          :files="uploadQueue"
+          :mode="mode"
+          @file-added="handleFileAdded"
+          @file-removed="handleFileRemoved"
+          @description-changed="handleDescriptionChanged"
+          @youtube-added="handleYouTubeAdded"
+        />
+
+        <!-- Delete Section (edit mode only) -->
+        <DeleteClassSection 
+          v-if="isEditMode"
+          :class-name="classData.name"
+          :is-deleting="isDeleting"
+          @delete="handleDelete"
+        />
+      </div>
+
+      <!-- Footer -->
+      <div class="modal-footer px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+        <button 
+          @click="handleClose"
+          class="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+          :disabled="isSubmitting || isDeleting"
+        >
+          Cancel
+        </button>
+        <button 
+          @click="handleSubmit"
+          :disabled="!isValid || isSubmitting"
+          class="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          <span v-if="isSubmitting">
+            {{ isEditMode ? 'Saving...' : 'Creating...' }}
+          </span>
+          <span v-else>
+            {{ isEditMode ? 'Save Changes' : 'Create Class' }}
+          </span>
+        </button>
+      </div>
+    </div>
+  </ModalWrapper>
+</template>
+
+<script setup>
+import { ref, computed, onMounted } from 'vue'
+import { useClassStore } from '@/stores/classes'
+import { useUIStore } from '@/stores/ui'
+import ModalWrapper from '@/components/ui/ModalWrapper.vue'
+import ClassInfoForm from '../forms/ClassInfoForm.vue'
+import KnowledgeManager from '../forms/KnowledgeManager.vue'
+import DeleteClassSection from '../components/DeleteClassSection.vue'
+
+const props = defineProps({
+  mode: {
+    type: String,
+    default: 'create',
+    validator: (value) => ['create', 'edit'].includes(value)
+  },
+  classId: {
+    type: Number,
+    default: null
+  }
+})
+
+const emit = defineEmits(['close'])
+
+const classStore = useClassStore()
+const uiStore = useUIStore()
+
+const classData = ref({
+  name: '',
+  description: ''
+})
+
+const validationErrors = ref({})
+const isSubmitting = ref(false)
+const isDeleting = ref(false)
+
+const isEditMode = computed(() => props.mode === 'edit')
+const uploadQueue = computed(() => classStore.uploadQueue)
+
+const isValid = computed(() => {
+  return classData.value.name.trim().length > 0
+})
+
+onMounted(async () => {
+  // Clear upload queue
+  classStore.clearUploadQueue()
+  
+  if (isEditMode.value && props.classId) {
+    // Fetch class details
+    try {
+      const classDetails = await classStore.fetchClassDetails(props.classId)
+      classData.value.name = classDetails.name
+      classData.value.description = classDetails.description || ''
+      
+      // Add existing documents to queue
+      classDetails.documents.forEach(doc => {
+        classStore.addExistingToQueue(doc)
+      })
+    } catch (error) {
+      console.error('Failed to fetch class details:', error)
+    }
+  }
+})
+
+async function handleSubmit() {
+  if (!isValid.value || isSubmitting.value) return
+  
+  isSubmitting.value = true
+  validationErrors.value = {}
+  
+  try {
+    if (isEditMode.value) {
+      // Update class info
+      await classStore.updateClass(props.classId, {
+        name: classData.value.name,
+        description: classData.value.description
+      })
+      
+      // Handle file operations
+      const filesToProcess = uploadQueue.value.filter(f => 
+        f.status === 'new' || f.status === 'modified' || f.status === 'deleted'
+      )
+      
+      for (const fileObj of filesToProcess) {
+        if (fileObj.status === 'new') {
+          // Upload new file
+          if (fileObj.isYouTube) {
+            await classStore.uploadYouTubeVideo(
+              props.classId,
+              fileObj.url,
+              fileObj.description
+            )
+          } else {
+            await classStore.uploadDocument(
+              props.classId,
+              fileObj.file,
+              fileObj.description
+            )
+          }
+        } else if (fileObj.status === 'modified') {
+          // Update description
+          await classStore.updateDocumentDescription(
+            fileObj.id,
+            fileObj.description
+          )
+        } else if (fileObj.status === 'deleted') {
+          // Delete file
+          await classStore.deleteDocument(fileObj.id)
+        }
+      }
+      
+      // Refresh class details
+      await classStore.fetchClassDetails(props.classId)
+    } else {
+      // Create new class
+      const newFiles = uploadQueue.value.filter(f => !f.isYouTube)
+      const youtubeVideos = uploadQueue.value.filter(f => f.isYouTube)
+      
+      await classStore.createClass({
+        name: classData.value.name,
+        description: classData.value.description,
+        files: newFiles,
+        youtubeVideos: youtubeVideos
+      })
+    }
+    
+    handleClose()
+  } catch (error) {
+    console.error('Failed to save class:', error)
+    validationErrors.value.submit = error.message || 'Failed to save class'
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
+async function handleDelete() {
+  if (!props.classId) return
+  
+  const confirmed = confirm(
+    `Are you sure you want to delete "${classData.value.name}"? This action cannot be undone.`
+  )
+  
+  if (!confirmed) return
+  
+  isDeleting.value = true
+  
+  try {
+    await classStore.deleteClass(props.classId)
+    handleClose()
+  } catch (error) {
+    console.error('Failed to delete class:', error)
+    alert('Failed to delete class. Please try again.')
+  } finally {
+    isDeleting.value = false
+  }
+}
+
+function handleFileAdded(fileObj) {
+  classStore.addToUploadQueue(fileObj.file, fileObj.description)
+}
+
+function handleFileRemoved(fileId) {
+  classStore.removeFromUploadQueue(fileId)
+}
+
+function handleDescriptionChanged({ fileId, description }) {
+  classStore.updateFileDescription(fileId, description)
+}
+
+function handleYouTubeAdded(videoData) {
+  const videoObj = {
+    id: Date.now() + Math.random(),
+    url: videoData.url,
+    description: videoData.description || '',
+    status: 'new',
+    isYouTube: true,
+    isExisting: false
+  }
+  classStore.uploadQueue.push(videoObj)
+}
+
+function handleClose() {
+  classStore.clearUploadQueue()
+  emit('close')
+}
+</script>
+
+
+### NEW FILE: Vue-Frontend/src/components/features/class-management/forms/ClassInfoForm.vue
+<template>
+  <div class="class-info-form space-y-4">
+    <div>
+      <label for="className" class="block text-sm font-medium text-gray-700 mb-1">
+        Class Name <span class="text-red-500">*</span>
+      </label>
+      <input
+        id="className"
+        type="text"
+        :value="name"
+        @input="$emit('update:name', $event.target.value)"
+        placeholder="e.g., Physics 101"
+        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+        :class="{ 'border-red-500': errors.name }"
+      />
+      <p v-if="errors.name" class="mt-1 text-sm text-red-600">
+        {{ errors.name }}
+      </p>
+    </div>
+
+    <div>
+      <label for="classDescription" class="block text-sm font-medium text-gray-700 mb-1">
+        Description
+      </label>
+      <textarea
+        id="classDescription"
+        :value="description"
+        @input="$emit('update:description', $event.target.value)"
+        placeholder="What is this class about?"
+        rows="3"
+        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none"
+      ></textarea>
+    </div>
+  </div>
+</template>
+
+<script setup>
+defineProps({
+  name: {
+    type: String,
+    required: true
+  },
+  description: {
+    type: String,
+    default: ''
+  },
+  errors: {
+    type: Object,
+    default: () => ({})
+  }
+})
+
+defineEmits(['update:name', 'update:description'])
+</script>
+
+
+### NEW FILE: Vue-Frontend/src/components/features/class-management/forms/KnowledgeManager.vue
+<template>
+  <div class="knowledge-manager space-y-4">
+    <h3 class="text-lg font-medium text-gray-900">Knowledge Base</h3>
+    
+    <!-- Upload Zone -->
+    <FileUploadZone 
+      @file-added="handleFileAdded"
+      @youtube-added="handleYouTubeAdded"
+    />
+
+    <!-- File Table -->
+    <FileTable 
+      v-if="files.length > 0"
+      :files="files"
+      :mode="mode"
+      @description-changed="handleDescriptionChanged"
+      @file-removed="handleFileRemoved"
+    />
+
+    <p v-else class="text-sm text-gray-500 text-center py-4">
+      No files uploaded yet. Add files or YouTube videos to get started.
+    </p>
+  </div>
+</template>
+
+<script setup>
+import FileUploadZone from '../components/FileUploadZone.vue'
+import FileTable from '../components/FileTable.vue'
+
+const props = defineProps({
+  files: {
+    type: Array,
+    required: true
+  },
+  mode: {
+    type: String,
+    default: 'create'
+  }
+})
+
+const emit = defineEmits(['file-added', 'file-removed', 'description-changed', 'youtube-added'])
+
+function handleFileAdded(fileObj) {
+  emit('file-added', fileObj)
+}
+
+function handleFileRemoved(fileId) {
+  emit('file-removed', fileId)
+}
+
+function handleDescriptionChanged(data) {
+  emit('description-changed', data)
+}
+
+function handleYouTubeAdded(videoData) {
+  emit('youtube-added', videoData)
+}
+</script>
+
+
+### NEW FILE: Vue-Frontend/src/components/features/class-management/components/FileUploadZone.vue
+<template>
+  <div class="file-upload-zone space-y-3">
+    <!-- Drag & Drop Area -->
+    <div 
+      class="drop-zone border-2 border-dashed rounded-lg p-8 text-center transition-colors"
+      :class="{
+        'border-primary-400 bg-primary-50': isDragging,
+        'border-gray-300 hover:border-gray-400': !isDragging
+      }"
+      @dragover.prevent="isDragging = true"
+      @dragleave="isDragging = false"
+      @drop.prevent="handleDrop"
+    >
+      <div class="drop-content">
+        <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path>
+        </svg>
+        <p class="mt-2 text-sm text-gray-600">
+          Drag files here or
+        </p>
+        <button 
+          @click="triggerFileInput"
+          type="button"
+          class="mt-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+        >
+          Browse Files
+        </button>
+        <p class="mt-2 text-xs text-gray-500">
+          PDF, DOCX, XLSX, PPTX, TXT (Max 10MB)
+        </p>
+      </div>
+      <input 
+        ref="fileInput"
+        type="file"
+        multiple
+        accept=".pdf,.docx,.xlsx,.pptx,.txt"
+        @change="handleFileSelect"
+        class="hidden"
+      />
+    </div>
+
+    <!-- YouTube Input -->
+    <YouTubeInput @video-added="handleYouTubeVideo" />
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import YouTubeInput from './YouTubeInput.vue'
+
+const emit = defineEmits(['file-added', 'youtube-added'])
+
+const fileInput = ref(null)
+const isDragging = ref(false)
+
+function triggerFileInput() {
+  fileInput.value?.click()
+}
+
+function handleDrop(event) {
+  isDragging.value = false
+  const files = Array.from(event.dataTransfer.files)
+  processFiles(files)
+}
+
+function handleFileSelect(event) {
+  const files = Array.from(event.target.files)
+  processFiles(files)
+  // Reset input
+  event.target.value = ''
+}
+
+function processFiles(files) {
+  files.forEach(file => {
+    if (validateFile(file)) {
+      emit('file-added', {
+        file,
+        description: ''
+      })
+    } else {
+      alert(`Invalid file: ${file.name}. Please check file type and size.`)
+    }
+  })
+}
+
+function validateFile(file) {
+  // Check file size (10MB limit)
+  if (file.size > 10 * 1024 * 1024) {
+    return false
+  }
+  
+  // Check file type
+  const allowedTypes = ['pdf', 'docx', 'xlsx', 'pptx', 'txt']
+  const ext = file.name.split('.').pop().toLowerCase()
+  return allowedTypes.includes(ext)
+}
+
+function handleYouTubeVideo(videoData) {
+  emit('youtube-added', videoData)
+}
+</script>
+
+
+### NEW FILE: Vue-Frontend/src/components/features/class-management/components/YouTubeInput.vue
+<template>
+  <div class="youtube-input">
+    <div class="flex items-center space-x-2">
+      <div class="flex-1">
+        <input
+          v-model="youtubeUrl"
+          type="url"
+          placeholder="Paste YouTube URL here..."
+          class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent text-sm"
+          @keyup.enter="handleAddVideo"
+        />
+      </div>
+      <button
+        @click="handleAddVideo"
+        type="button"
+        :disabled="!isValidUrl"
+        class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium"
+      >
+        Add Video
+      </button>
+    </div>
+    <p v-if="error" class="mt-1 text-sm text-red-600">
+      {{ error }}
+    </p>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed } from 'vue'
+
+const emit = defineEmits(['video-added'])
+
+const youtubeUrl = ref('')
+const error = ref('')
+
+const isValidUrl = computed(() => {
+  if (!youtubeUrl.value) return false
+  
+  const url = youtubeUrl.value.toLowerCase()
+  return url.includes('youtube.com/watch') || 
+         url.includes('youtu.be/') || 
+         url.includes('youtube.com/embed/')
+})
+
+function handleAddVideo() {
+  error.value = ''
+  
+  if (!isValidUrl.value) {
+    error.value = 'Please enter a valid YouTube URL'
+    return
+  }
+  
+  emit('video-added', {
+    url: youtubeUrl.value,
+    description: ''
+  })
+  
+  youtubeUrl.value = ''
+}
+</script>
+
+
+### NEW FILE: Vue-Frontend/src/components/features/class-management/components/FileTable.vue
+<template>
+  <div class="file-table-container">
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 border-b border-gray-200">
+          <tr>
+            <th class="px-4 py-3 text-left font-medium text-gray-700">Filename</th>
+            <th class="px-4 py-3 text-left font-medium text-gray-700">Size</th>
+            <th class="px-4 py-3 text-left font-medium text-gray-700">Description</th>
+            <th class="px-4 py-3 text-center font-medium text-gray-700">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          <tr 
+            v-for="file in files" 
+            :key="file.id"
+            :class="getRowClass(file)"
+            class="transition-colors"
+          >
+            <td class="px-4 py-3">
+              <div class="flex items-center space-x-2">
+                <span class="text-xl">{{ getFileIcon(file) }}</span>
+                <span class="font-medium text-gray-900 truncate max-w-xs">
+                  {{ getFilename(file) }}
+                </span>
+              </div>
+            </td>
+            <td class="px-4 py-3 text-gray-600">
+              {{ formatFileSize(file) }}
+            </td>
+            <td class="px-4 py-3">
+              <input 
+                :value="file.description"
+                @input="handleDescriptionChange(file, $event.target.value)"
+                type="text"
+                placeholder="Add description..."
+                class="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-primary-500 focus:border-transparent"
+              />
+            </td>
+            <td class="px-4 py-3 text-center">
+              <button 
+                @click="handleDelete(file)"
+                class="p-1 text-red-600 hover:bg-red-50 rounded transition-colors"
+                title="Delete"
+              >
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                </svg>
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</template>
+
+<script setup>
+const props = defineProps({
+  files: {
+    type: Array,
+    required: true
+  },
+  mode: {
+    type: String,
+    default: 'create'
+  }
+})
+
+const emit = defineEmits(['description-changed', 'file-removed'])
+
+const FILE_TYPE_ICONS = {
+  pdf: '📄',
+  docx: '📝',
+  xlsx: '📊',
+  pptx: '📊',
+  txt: '📃',
+  youtube: '🎥',
+  unknown: '📎'
+}
+
+function getRowClass(file) {
+  if (file.status === 'new') return 'bg-green-50'
+  if (file.status === 'deleted') return 'bg-red-50 opacity-60'
+  if (file.status === 'modified') return 'bg-orange-50'
+  return 'bg-white hover:bg-gray-50'
+}
+
+function getFileIcon(file) {
+  const type = file.file_type || (file.isYouTube ? 'youtube' : file.file?.name?.split('.').pop()?.toLowerCase() || 'unknown')
+  return FILE_TYPE_ICONS[type] || FILE_TYPE_ICONS.unknown
+}
+
+function getFilename(file) {
+  if (file.isYouTube) {
+    return file.url
+  }
+  return file.filename || file.file?.name || 'Unknown file'
+}
+
+function formatFileSize(file) {
+  if (file.isYouTube) {
+    return 'Video'
+  }
+  
+  const bytes = file.file_size || file.file?.size || 0
+  if (bytes === 0) return '-'
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+}
+
+function handleDescriptionChange(file, description) {
+  emit('description-changed', {
+    fileId: file.id,
+    description
+  })
+}
+
+function handleDelete(file) {
+  emit('file-removed', file.id)
+}
+</script>
+
+
+### NEW FILE: Vue-Frontend/src/components/features/class-management/components/DeleteClassSection.vue
+<template>
+  <div class="delete-section border-t border-red-200 pt-6 mt-6">
+    <h3 class="text-lg font-medium text-red-900 mb-2">Danger Zone</h3>
+    <p class="text-sm text-gray-600 mb-4">
+      Once you delete a class, there is no going back. All documents, chat sessions, and member data will be permanently deleted.
+    </p>
+    <button
+      @click="handleDelete"
+      :disabled="isDeleting"
+      class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+    >
+      {{ isDeleting ? 'Deleting...' : 'Delete This Class' }}
+    </button>
+  </div>
+</template>
+
+<script setup>
+defineProps({
+  className: {
+    type: String,
+    required: true
+  },
+  isDeleting: {
+    type: Boolean,
+    default: false
+  }
+})
+
+const emit = defineEmits(['delete'])
+
+function handleDelete() {
+  emit('delete')
+}
+</script>
+
+
+### NEW FILE: Vue-Frontend/src/components/features/class-management/views/ClassWelcome.vue
+<template>
+  <div class="class-welcome flex items-center justify-center h-full bg-gray-50 p-8">
+    <!-- No Classes Variant -->
+    <div v-if="variant === 'no-classes'" class="text-center max-w-md">
+      <div class="welcome-icon text-6xl mb-4">🎓</div>
+      <h1 class="text-3xl font-bold text-gray-900 mb-3">Welcome to StudHelper!</h1>
+      <p class="text-lg text-gray-600 mb-6">
+        Create your first class to get started with AI-powered learning.
+      </p>
+      <button 
+        @click="openCreateClassModal"
+        class="px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors text-lg font-medium"
+      >
+        + Create Your First Class
+      </button>
+    </div>
+
+    <!-- Class Selected Variant -->
+    <div v-else-if="variant === 'class-selected'" class="text-center max-w-2xl">
+      <div class="class-header mb-8">
+        <div class="class-icon text-5xl mb-3">📚</div>
+        <h1 class="text-3xl font-bold text-gray-900 mb-2">{{ className }}</h1>
+        <p class="text-lg text-gray-600">{{ classDescription || 'No description provided' }}</p>
+      </div>
+
+      <div class="welcome-message mb-6">
+        <h2 class="text-2xl font-semibold text-gray-800 mb-2">Ready to learn?</h2>
+        <p class="text-gray-600">
+          Create a new chat session to start asking questions about your materials.
+        </p>
+      </div>
+
+      <button 
+        @click="createChatSession"
+        disabled
+        class="px-6 py-3 bg-gray-400 text-white rounded-lg cursor-not-allowed inline-flex items-center space-x-2"
+      >
+        <span>+ New Chat Session</span>
+        <span class="px-2 py-0.5 bg-gray-600 rounded text-xs">Phase 4</span>
+      </button>
+
+      <div class="class-stats mt-8 flex justify-center space-x-8">
+        <div class="stat text-center">
+          <div class="stat-value text-2xl font-bold text-primary-600">{{ documentCount }}</div>
+          <div class="stat-label text-sm text-gray-600">Documents</div>
+        </div>
+        <div class="stat text-center">
+          <div class="stat-value text-2xl font-bold text-primary-600">{{ sessionCount }}</div>
+          <div class="stat-label text-sm text-gray-600">Chat Sessions</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { useUIStore } from '@/stores/ui'
+
+defineProps({
+  variant: {
+    type: String,
+    required: true,
+    validator: (value) => ['no-classes', 'class-selected'].includes(value)
+  },
+  className: {
+    type: String,
+    default: ''
+  },
+  classDescription: {
+    type: String,
+    default: ''
+  },
+  documentCount: {
+    type: Number,
+    default: 0
+  },
+  sessionCount: {
+    type: Number,
+    default: 0
+  }
+})
+
+const uiStore = useUIStore()
+
+function openCreateClassModal() {
+  uiStore.openModal('ClassModal', { mode: 'create' })
+}
+
+function createChatSession() {
+  // PLACEHOLDER - Phase 4
+  console.log('Chat session creation coming in Phase 4')
+}
+</script>
+
+
+### NEW FILE: Vue-Frontend/src/components/features/class-management/views/ClassGrid.vue
+<template>
+  <div class="class-grid-container p-8">
+    <div class="grid-header flex justify-between items-center mb-6">
+      <h2 class="text-2xl font-bold text-gray-900">Your Classes</h2>
+      <button 
+        @click="openCreateClassModal"
+        class="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+      >
+        + New Class
+      </button>
+    </div>
+
+    <div class="class-grid grid grid-cols-2 gap-6">
+      <div 
+        v-for="classItem in classes" 
+        :key="classItem.id"
+        class="class-card p-6 bg-white border border-gray-200 rounded-lg cursor-pointer hover:border-primary-400 hover:shadow-lg transition-all duration-200 transform hover:-translate-y-1"
+        @click="selectClass(classItem)"
+      >
+        <div class="card-icon text-4xl mb-3">📚</div>
+        <h3 class="card-title text-xl font-semibold text-gray-900 mb-2">
+          {{ classItem.name }}
+        </h3>
+        <p class="card-description text-gray-600 mb-4 line-clamp-2">
+          {{ classItem.description || 'No description' }}
+        </p>
+        <div class="card-footer flex items-center text-sm text-gray-500">
+          <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+          </svg>
+          <span>{{ classItem.chat_session_count || 0 }} chat sessions</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { useClassStore } from '@/stores/classes'
+import { useUIStore } from '@/stores/ui'
+
+defineProps({
+  classes: {
+    type: Array,
+    required: true
+  }
+})
+
+const classStore = useClassStore()
+const uiStore = useUIStore()
+
+function selectClass(classItem) {
+  classStore.selectClass(classItem)
+}
+
+function openCreateClassModal() {
+  uiStore.openModal('ClassModal', { mode: 'create' })
+}
+</script>
+
+<style scoped>
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+</style>
+
+
+### MODIFIED FILE: Vue-Frontend/src/components/features/dashboard/Sidebar.vue
+<template>
+  <div class="h-full flex flex-col">
+    <!-- Header -->
+    <div class="p-4 border-b border-gray-200">
+      <div v-if="sidebarExpanded" class="flex items-center justify-between">
+        <h2 class="font-semibold text-gray-900">Classes</h2>
+        <button 
+          @click="openCreateClassModal"
+          class="p-1 rounded-md hover:bg-gray-100"
+          title="Create New Class"
+        >
+          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+          </svg>
+        </button>
+      </div>
+      <div v-else class="flex justify-center">
+        <button 
+          @click="openCreateClassModal"
+          class="p-1 rounded-md hover:bg-gray-100"
+          title="Create New Class"
+        >
+          <svg class="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Classes List -->
+    <div class="flex-1 overflow-y-auto">
+      <div v-if="isLoading" class="p-4">
+        <div class="animate-pulse space-y-2">
+          <div class="h-4 bg-gray-200 rounded"></div>
+          <div class="h-4 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      </div>
+
+      <div v-else-if="classes.length === 0" class="p-4 text-center text-gray-500">
+        <div v-if="sidebarExpanded">
+          <p class="mb-2">No classes yet</p>
+          <button @click="openCreateClassModal" class="text-primary-600 hover:text-primary-700">
+            Create your first class
+          </button>
+        </div>
+      </div>
+
+      <div v-else class="p-2 space-y-1">
+        <div 
+          v-for="classItem in classes" 
+          :key="classItem.id"
+          class="group"
+        >
+          <!-- Class Item -->
+          <div 
+            :class="[
+              'flex items-center p-2 rounded-lg cursor-pointer transition-colors',
+              currentClass?.id === classItem.id ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50'
+            ]"
+            @click="selectClass(classItem)"
+          >
+            <button
+              @click.stop="toggleClassExpansion(classItem.id)"
+              class="mr-2 p-1"
+            >
+              <svg 
+                :class="[
+                  'w-4 h-4 transition-transform',
+                  expandedClasses.includes(classItem.id) ? 'rotate-90' : ''
+                ]"
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+              </svg>
+            </button>
+            
+            <div v-if="sidebarExpanded" class="flex-1 min-w-0">
+              <p class="text-sm font-medium truncate">{{ classItem.name }}</p>
+              <p class="text-xs text-gray-500">{{ classItem.chat_session_count || 0 }} chats</p>
+            </div>
+            
+            <div v-if="sidebarExpanded" class="flex space-x-1 opacity-0 group-hover:opacity-100">
+              <button
+                @click.stop="createNewChat(classItem)"
+                class="p-1 rounded hover:bg-gray-200"
+                title="New Chat"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                </svg>
+              </button>
+              <button
+                @click.stop="openClassInfo(classItem)"
+                class="p-1 rounded hover:bg-gray-200"
+                title="Class Info"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Chats List -->
+          <div 
+            v-if="expandedClasses.includes(classItem.id) && sidebarExpanded"
+            class="ml-6 space-y-1"
+          >
+            <div
+              v-for="chat in classItem.chats || []"
+              :key="chat.id"
+              :class="[
+                'flex items-center p-2 rounded-lg cursor-pointer text-sm transition-colors',
+                currentChat?.id === chat.id ? 'bg-primary-100 text-primary-800' : 'hover:bg-gray-50'
+              ]"
+              @click="selectChat(chat)"
+            >
+              <svg class="w-4 h-4 mr-2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+              </svg>
+              <span class="truncate">{{ chat.title || 'New Chat' }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useUIStore } from '@/stores/ui'
+import { useClassStore } from '@/stores/classes'
+
+const uiStore = useUIStore()
+const classStore = useClassStore()
+
+const { sidebarExpanded } = storeToRefs(uiStore)
+const { classes, currentClass, currentChat, isLoading } = storeToRefs(classStore)
+
+const expandedClasses = ref([])
+
+const toggleClassExpansion = (classId) => {
+  const index = expandedClasses.value.indexOf(classId)
+  if (index > -1) {
+    expandedClasses.value.splice(index, 1)
+  } else {
+    expandedClasses.value.push(classId)
+  }
+}
+
+const selectClass = (classItem) => {
+  classStore.selectClass(classItem)
+  if (!expandedClasses.value.includes(classItem.id)) {
+    expandedClasses.value.push(classItem.id)
+  }
+}
+
+const selectChat = (chat) => {
+  classStore.selectChat(chat)
+}
+
+const openCreateClassModal = () => {
+  uiStore.openModal('ClassModal', { mode: 'create' })
+}
+
+const createNewChat = (classItem) => {
+  // PLACEHOLDER - Phase 4
+  console.log('Creating new chat for class:', classItem.name)
+  alert('Chat creation coming in Phase 4!')
+}
+
+const openClassInfo = (classItem) => {
+  // Open ClassModal in edit mode
+  uiStore.openModal('ClassModal', { 
+    mode: 'edit', 
+    classId: classItem.id 
+  })
+}
+
+onMounted(() => {
+  classStore.fetchClasses()
+})
+</script>
+
+
+### MODIFIED FILE: Vue-Frontend/src/components/ui/ModalManager.vue
+<template>
+  <div>
+    <!-- Render active modal -->
+    <component
+      v-if="activeModal"
+      :is="modalComponents[activeModal.name]"
+      v-bind="activeModal.props"
+      @close="closeModal"
+    />
+  </div>
+</template>
+
+<script setup>
+import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useUIStore } from '@/stores/ui'
+
+// Import modal components
+import ClassModal from '@/components/features/class-management/modals/ClassModal.vue'
+
+const uiStore = useUIStore()
+const { activeModal } = storeToRefs(uiStore)
+
+const closeModal = () => {
+  uiStore.closeModal()
+}
+
+// Register modal components
+const modalComponents = {
+  ClassModal
+}
+</script>
+
+
+### MODIFIED FILE: Vue-Frontend/src/views/DashboardView.vue
+<template>
+  <div class="h-screen flex bg-gray-50">
+    <!-- Sidebar -->
+    <div :class="[
+      'bg-white border-r border-gray-200 transition-all duration-300',
+      sidebarExpanded ? 'w-80' : 'w-16'
+    ]">
+      <Sidebar />
+    </div>
+
+    <!-- Main Content -->
+    <div class="flex-1 flex flex-col">
+      <!-- Header -->
+      <header class="bg-white border-b border-gray-200 px-6 py-4">
+        <div class="flex justify-between items-center">
+          <div class="flex items-center space-x-4">
+            <button 
+              @click="toggleSidebar"
+              class="p-2 rounded-lg hover:bg-gray-100"
+            >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+              </svg>
+            </button>
+            <h1 class="text-xl font-semibold text-gray-900">
+              {{ currentClass ? currentClass.name : 'StudHelper Dashboard' }}
+            </h1>
+          </div>
+          
+          <UserMenu />
+        </div>
+      </header>
+
+      <!-- Content Area -->
+      <main class="flex-1 overflow-hidden relative">
+        <!-- Verification Banner -->
+        <VerificationBanner />
+        
+        <!-- Dynamic Content Based on State -->
+        <ChatInterface v-if="currentChat" />
+        <ClassWelcome 
+          v-else-if="currentClass"
+          variant="class-selected"
+          :class-name="currentClass.name"
+          :class-description="currentClass.description"
+          :document-count="currentClass.document_count || 0"
+          :session-count="currentClass.chat_session_count || 0"
+        />
+        <ClassGrid 
+          v-else-if="hasClasses"
+          :classes="classes"
+        />
+        <ClassWelcome 
+          v-else
+          variant="no-classes"
+        />
+      </main>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useUIStore } from '@/stores/ui'
+import { useClassStore } from '@/stores/classes'
+import Sidebar from '@/components/features/dashboard/Sidebar.vue'
+import UserMenu from '@/components/features/dashboard/UserMenu.vue'
+import ChatInterface from '@/components/features/dashboard/ChatInterface.vue'
+import ClassWelcome from '@/components/features/class-management/views/ClassWelcome.vue'
+import ClassGrid from '@/components/features/class-management/views/ClassGrid.vue'
+import VerificationBanner from '@/components/features/dashboard/VerificationBanner.vue'
+
+const uiStore = useUIStore()
+const classStore = useClassStore()
+
+const { sidebarExpanded } = storeToRefs(uiStore)
+const { classes, currentClass, currentChat, hasClasses } = storeToRefs(classStore)
+
+const toggleSidebar = () => {
+  uiStore.toggleSidebar()
+}
+</script>
+
+
+### NEW FILE: README.md
+# Class Management System - Setup Instructions
+
+## Database Migration
+
+1. **Run Alembic Migration**
+```bash
+cd Backend
+alembic upgrade head
+```
+
+This will add:
+- `description` column to `classes` table
+- `description` column to `documents` table
+- `url` column to `documents` table
+- Indexes for better query performance
+
+## Backend Setup
+
+1. **No configuration changes needed** - The migration handles all database changes
+
+2. **Restart the backend server**
+```bash
+cd Backend
+uvicorn app.main:app --reload
+```
+
+## Frontend Setup
+
+1. **No npm package installation needed** - All dependencies already exist
+
+2. **File Structure Changes**
+
+The following files need to be created/moved:
+
+**NEW FILES CREATED:**
+```
+Vue-Frontend/src/
+├── services/classService.js
+├── components/features/class-management/
+│   ├── modals/ClassModal.vue
+│   ├── forms/
+│   │   ├── ClassInfoForm.vue
+│   │   └── KnowledgeManager.vue
+│   ├── components/
+│   │   ├── FileUploadZone.vue
+│   │   ├── FileTable.vue
+│   │   ├── YouTubeInput.vue
+│   │   └── DeleteClassSection.vue
+│   └── views/
+│       ├── ClassWelcome.vue
+│       └── ClassGrid.vue
+```
+
+**MODIFIED FILES:**
+```
+Vue-Frontend/src/
+├── stores/classes.js
+├── components/features/dashboard/
+│   └── Sidebar.vue
+├── components/ui/ModalManager.vue
+└── views/DashboardView.vue
+```
+
+**FILES TO DELETE:**
+```
+Vue-Frontend/src/components/features/
+├── class-management/modals/CreateClassWizard/index.vue
+└── dashboard/WelcomeScreen.vue
+```
+
+3. **Restart the frontend server**
+```bash
+cd Vue-Frontend
+npm run dev
+```
+
+## Environment Variables
+
+**No changes needed** - All existing environment variables remain the same.
+
+## Testing the Implementation
+
+1. **Create a Class**
+   - Click the "+" button in the sidebar
+   - Fill in class name and description
+   - Upload files (PDF, DOCX, etc.) or add YouTube videos
+   - Click "Create Class"
+
+2. **View Class Grid**
+   - If you have classes but none selected, you'll see a 2x2 grid
+   - Click any class card to select it
+
+3. **Edit a Class**
+   - Click the info (ℹ️) button next to a class in the sidebar
+   - Modify class info, add/remove files, or delete the class
+
+4. **File Management**
+   - New files show with green background
+   - Deleted files show with red background
+   - Modified descriptions show with orange background
+
+## Known Limitations (Phase 2)
+
+1. **Document Processing**: Files are uploaded but not processed yet (coming in Phase 3)
+2. **Chat Sessions**: Button is disabled - implementation coming in Phase 4
+3. **File Size**: 10MB limit is set but not enforced on upload progress
+
+## API Endpoints Added
+
+```
+POST   /api/v1/classes                          # Create class
+GET    /api/v1/classes                          # List classes
+GET    /api/v1/classes/{id}                     # Get class details
+PUT    /api/v1/classes/{id}                     # Update class
+DELETE /api/v1/classes/{id}                     # Delete class
+
+POST   /api/v1/documents/classes/{id}/upload         # Upload file
+POST   /api/v1/documents/classes/{id}/upload-youtube # Add YouTube video
+GET    /api/v1/documents/classes/{id}                # List documents
+PUT    /api/v1/documents/{id}                        # Update description
+DELETE /api/v1/documents/{id}                        # Delete document
+```
+
+## Troubleshooting
+
+### Backend Issues
+
+1. **Migration fails**: Check your database connection in `.env`
+2. **Import errors**: Make sure all new schema files are created
+3. **404 errors**: Verify routes are imported in `main.py`
+
+### Frontend Issues
+
+1. **Component not found**: Check file paths and imports
+2. **Modal doesn't open**: Verify `ModalManager.vue` has `ClassModal` registered
+3. **Classes don't load**: Check browser console for API errors
+
+### Common Errors
+
+**"Class code already exists"**
+- The system will retry generating a unique code automatically
+
+**"Not a member of this class"**
+- User must be added to class via ClassMembership (automatic for owner)
+
+**"File size exceeds limit"**
+- Files must be under 10MB
+
+## Next Steps
+
+After verifying everything works:
+
+1. **Phase 3**: Implement document processing (text extraction, embeddings)
+2. **Phase 4**: Implement chat interface and AI integration
+3. **Phase 5**: Add permission management and usage tracking
+
+## Support
+
+If you encounter issues:
+1. Check browser console for errors
+2. Check backend logs for API errors
+3. Verify all files are in correct locations
+4. Ensure database migration completed successfully

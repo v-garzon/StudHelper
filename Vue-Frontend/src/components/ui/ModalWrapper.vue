@@ -1,31 +1,25 @@
 <template>
-  <teleport to="#modal-container">
-    <div v-if="isVisible" class="modal-overlay" @click.self="handleBackdropClick">
-      <div class="modal-content">
-        <slot />
+  <div class="fixed inset-0 z-50 overflow-y-auto">
+    <div class="flex items-center justify-center min-h-screen px-4">
+      <!-- Overlay -->
+      <div 
+        class="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
+        @click="$emit('close')"
+      ></div>
+      
+      <!-- Modal Content -->
+      <div class="relative bg-white rounded-lg shadow-xl">
+        <slot></slot>
       </div>
     </div>
-  </teleport>
+  </div>
 </template>
 
 <script setup>
-defineProps({
-  isVisible: {
-    type: Boolean,
-    default: false
-  },
-  closeOnBackdrop: {
-    type: Boolean,
-    default: true
-  }
+defineEmits(['close'])
+
+// This prevents props from being passed down
+defineOptions({
+  inheritAttrs: false
 })
-
-const emit = defineEmits(['close'])
-
-const handleBackdropClick = () => {
-  if (props.closeOnBackdrop) {
-    emit('close')
-  }
-}
 </script>
-

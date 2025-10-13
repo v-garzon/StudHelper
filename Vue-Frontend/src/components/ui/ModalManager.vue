@@ -3,7 +3,7 @@
     <!-- Render active modal -->
     <component
       v-if="activeModal"
-      :is="activeModal.name"
+      :is="modalComponents[activeModal.name]"
       v-bind="activeModal.props"
       @close="closeModal"
     />
@@ -16,7 +16,7 @@ import { storeToRefs } from 'pinia'
 import { useUIStore } from '@/stores/ui'
 
 // Import modal components
-import CreateClassModal from '@/components/features/class-management/modals/CreateClassWizard/index.vue'
+import ClassModal from '@/components/features/class-management/modals/ClassModal.vue'
 
 const uiStore = useUIStore()
 const { activeModal } = storeToRefs(uiStore)
@@ -27,7 +27,8 @@ const closeModal = () => {
 
 // Register modal components
 const modalComponents = {
-  CreateClassModal
+  ClassModal
 }
 </script>
+
 

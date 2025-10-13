@@ -35,8 +35,25 @@
       <main class="flex-1 overflow-hidden relative">
         <!-- Verification Banner -->
         <VerificationBanner />
+        
+        <!-- Dynamic Content Based on State -->
         <ChatInterface v-if="currentChat" />
-        <WelcomeScreen v-else />
+        <ClassWelcome 
+          v-else-if="currentClass"
+          variant="class-selected"
+          :class-name="currentClass.name"
+          :class-description="currentClass.description"
+          :document-count="currentClass.document_count || 0"
+          :session-count="currentClass.chat_session_count || 0"
+        />
+        <ClassGrid 
+          v-else-if="hasClasses"
+          :classes="classes"
+        />
+        <ClassWelcome 
+          v-else
+          variant="no-classes"
+        />
       </main>
     </div>
   </div>
@@ -50,17 +67,19 @@ import { useClassStore } from '@/stores/classes'
 import Sidebar from '@/components/features/dashboard/Sidebar.vue'
 import UserMenu from '@/components/features/dashboard/UserMenu.vue'
 import ChatInterface from '@/components/features/dashboard/ChatInterface.vue'
-import WelcomeScreen from '@/components/features/dashboard/WelcomeScreen.vue'
+import ClassWelcome from '@/components/features/class-management/views/ClassWelcome.vue'
+import ClassGrid from '@/components/features/class-management/views/ClassGrid.vue'
 import VerificationBanner from '@/components/features/dashboard/VerificationBanner.vue'
 
 const uiStore = useUIStore()
 const classStore = useClassStore()
 
 const { sidebarExpanded } = storeToRefs(uiStore)
-const { currentClass, currentChat } = storeToRefs(classStore)
+const { classes, currentClass, currentChat, hasClasses } = storeToRefs(classStore)
 
 const toggleSidebar = () => {
   uiStore.toggleSidebar()
 }
 </script>
+
 
