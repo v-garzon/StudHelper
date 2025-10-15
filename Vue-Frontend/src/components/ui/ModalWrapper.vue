@@ -1,6 +1,6 @@
 <template>
   <div class="fixed inset-0 z-50 overflow-y-auto">
-    <div class="flex items-center justify-center min-h-screen px-4">
+    <div class="flex items-center justify-center min-h-screen p-4">
       <!-- Overlay -->
       <div 
         class="fixed inset-0 bg-black bg-opacity-50 transition-opacity"
@@ -8,7 +8,7 @@
       ></div>
       
       <!-- Modal Content -->
-      <div class="relative bg-white rounded-lg shadow-xl">
+      <div class="relative z-10 w-full flex items-center justify-center">
         <slot></slot>
       </div>
     </div>
@@ -17,9 +17,5 @@
 
 <script setup>
 defineEmits(['close'])
-
-// This prevents props from being passed down
-defineOptions({
-  inheritAttrs: false
-})
+defineOptions({ inheritAttrs: false })
 </script>

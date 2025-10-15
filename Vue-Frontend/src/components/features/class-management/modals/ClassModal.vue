@@ -1,6 +1,6 @@
 <template>
   <ModalWrapper @close="handleClose">
-    <div class="modal-content max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+    <div class="modal-content w-full max-w-4xl max-h-[90vh] overflow-y-auto bg-white rounded-lg">      
       <!-- Header -->
       <div class="modal-header px-6 py-4 border-b border-gray-200">
         <h2 class="text-2xl font-semibold text-gray-900">
@@ -9,7 +9,7 @@
       </div>
 
       <!-- Content -->
-      <div class="modal-body px-6 py-4 space-y-6">
+      <div class="modal-body px-6 py-4 space-y-6 w-full">
         <!-- Class Info Form -->
         <ClassInfoForm 
           v-model:name="classData.name"

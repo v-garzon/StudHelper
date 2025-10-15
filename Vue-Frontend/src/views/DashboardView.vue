@@ -23,7 +23,7 @@
               </svg>
             </button>
             <h1 class="text-xl font-semibold text-gray-900">
-              {{ currentClass ? currentClass.name : 'StudHelper Dashboard' }}
+                {{ selectedClass ? selectedClass.name : 'StudHelper Dashboard' }}
             </h1>
           </div>
           
@@ -38,14 +38,14 @@
         
         <!-- Dynamic Content Based on State -->
         <ChatInterface v-if="currentChat" />
-        <ClassWelcome 
-          v-else-if="currentClass"
-          variant="class-selected"
-          :class-name="currentClass.name"
-          :class-description="currentClass.description"
-          :document-count="currentClass.document_count || 0"
-          :session-count="currentClass.chat_session_count || 0"
-        />
+        <ClassWelcome
+            v-else-if="selectedClass"
+            variant="class-selected"
+            :class-name="selectedClass.name"
+            :class-description="selectedClass.description"
+            :document-count="selectedClass.document_count || 0"
+            :session-count="selectedClass.chat_session_count || 0"
+            />
         <ClassGrid 
           v-else-if="hasClasses"
           :classes="classes"
@@ -75,7 +75,7 @@ const uiStore = useUIStore()
 const classStore = useClassStore()
 
 const { sidebarExpanded } = storeToRefs(uiStore)
-const { classes, currentClass, currentChat, hasClasses } = storeToRefs(classStore)
+const { classes, selectedClass, currentChat, hasClasses } = storeToRefs(classStore)
 
 const toggleSidebar = () => {
   uiStore.toggleSidebar()

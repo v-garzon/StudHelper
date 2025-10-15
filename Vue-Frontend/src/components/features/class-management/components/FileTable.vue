@@ -29,13 +29,28 @@
               {{ formatFileSize(file) }}
             </td>
             <td class="px-4 py-3">
-              <input 
-                :value="file.description"
-                @input="handleDescriptionChange(file, $event.target.value)"
-                type="text"
-                placeholder="Add description..."
-                class="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-primary-500 focus:border-transparent"
-              />
+              <!-- Empty state - Add button -->
+              <button
+                v-if="!file.description || file.description.trim() === ''"
+                @click="openDescriptionModal(file)"
+                class="px-3 py-1 text-sm text-primary-600 hover:bg-primary-50 rounded border border-primary-300 transition-colors"
+              >
+                + Add
+              </button>
+
+              <!-- Has description - Preview with hover effect -->
+              <div
+                v-else
+                @click="openDescriptionModal(file)"
+                class="relative cursor-pointer group"
+              >
+                <p class="text-gray-700 truncate group-hover:blur-sm transition-all duration-200">
+                  {{ file.description }}
+                </p>
+                <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                  <span class="text-sm font-medium text-primary-600">Edit</span>
+                </div>
+              </div>
             </td>
             <td class="px-4 py-3 text-center">
               <button 
@@ -52,10 +67,22 @@
         </tbody>
       </table>
     </div>
+
+    <!-- Description Editor Modal -->
+    <DescriptionEditorModal
+      v-if="editingFile"
+      :filename="getFilename(editingFile)"
+      :description="editingFile.description || ''"
+      @close="editingFile = null"
+      @save="handleDescriptionSave"
+    />
   </div>
 </template>
 
 <script setup>
+import { ref } from 'vue'
+import DescriptionEditorModal from './DescriptionEditorModal.vue'
+
 const props = defineProps({
   files: {
     type: Array,
@@ -68,6 +95,8 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['description-changed', 'file-removed'])
+
+const editingFile = ref(null)
 
 const FILE_TYPE_ICONS = {
   pdf: '📄',
@@ -110,16 +139,21 @@ function formatFileSize(file) {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
-function handleDescriptionChange(file, description) {
-  emit('description-changed', {
-    fileId: file.id,
-    description
-  })
+function openDescriptionModal(file) {
+  editingFile.value = file
+}
+
+function handleDescriptionSave(description) {
+  if (editingFile.value) {
+    emit('description-changed', {
+      fileId: editingFile.value.id,
+      description
+    })
+  }
 }
 
 function handleDelete(file) {
   emit('file-removed', file.id)
 }
 </script>
-
 
